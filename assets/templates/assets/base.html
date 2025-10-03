@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Asset Management{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <!-- Fixed Navigation -->
+    <nav class="bg-blue-900 text-white p-4 shadow-2xl fixed w-full top-0 z-20">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold">Asset Management System</h1>
+            {% if user.is_authenticated %}
+                <a href="{% url 'account_logout' %}" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">Logout</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <div class="flex pt-16">
+        <aside class="bg-gray-800 shadow-2xl w-64 min-h-screen fixed left-0 top-16 z-10">
+            <nav class="p-4 space-y-2">
+                <a href="{% url 'employee_overview' %}" class="nav-link block py-3 px-4 text-gray-300 hover:bg-gray-700 rounded-lg transition duration-200">Employee Overview</a>
+                <a href="{% url 'employee_list' %}" class="nav-link block py-3 px-4 text-gray-300 hover:bg-gray-700 rounded-lg transition duration-200">Employee Management</a>
+                <a href="{% url 'asset_assign' %}" class="nav-link block py-3 px-4 text-gray-300 hover:bg-gray-700 rounded-lg transition duration-200">Asset Management</a>
+                <a href="{% url 'assettype_list' %}" class="nav-link block py-3 px-4 text-gray-300 hover:bg-gray-700 rounded-lg transition duration-200">Asset Types</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 ml-64 p-6">
+            <div class="bg-white rounded-xl shadow-2xl p-8">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const currentPath = window.location.pathname;
+            const navLinks = document.querySelectorAll('.nav-link');
+            navLinks.forEach(link => {
+                if (link.getAttribute('href') === currentPath) {
+                    link.classList.add('bg-red-600', 'text-white', 'shadow-md');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{% extends 'assets/base.html' %}
+
+{% block title %}Delete Employee{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto bg-white rounded-xl shadow-2xl p-8">
+    <h1 class="text-2xl font-bold text-gray-800 mb-4">Delete Employee</h1>
+    <p class="mb-4 text-gray-600">Are you sure you want to delete "{{ employee.name }}" ({{ employee.employee_id }})? This action cannot be undone.</p>
+    <p class="text-sm text-gray-500 mb-6">All assigned assets will be unassigned and returned to the unassigned pool.</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="flex justify-end space-x-4">
+            <a href="{% url 'employee_detail' employee.employee_id %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</a>
+            <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200">Delete Employee</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

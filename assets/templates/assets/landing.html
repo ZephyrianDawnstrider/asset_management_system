@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asset Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/heroicons/2.1.1/24/outline/heroicons.min.css">
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex-shrink-0">
+                    <h1 class="text-2xl font-bold text-blue-900">Asset Management</h1>
+                </div>
+                <div>
+                    <a href="{% url 'account_login' %}" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-lg transition duration-300">Login</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="bg-blue-900 text-white text-center py-20">
+        <div class="max-w-4xl mx-auto px-4">
+            <h2 class="text-5xl font-extrabold mb-4">Streamline Your Asset Tracking</h2>
+            <p class="text-xl text-blue-200 mb-8">A powerful and intuitive system to manage your company's valuable assets efficiently.</p>
+            <a href="{% url 'account_login' %}" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition duration-300 transform hover:scale-105">
+                Get Started
+            </a>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section class="py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h3 class="text-4xl font-bold">Key Features</h3>
+                <p class="text-lg text-gray-600 mt-2">Everything you need to manage your assets.</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-12 text-center">
+                <div class="p-8 bg-white rounded-xl shadow-2xl">
+                    <div class="flex items-center justify-center h-16 w-16 rounded-full bg-blue-100 text-blue-900 mx-auto mb-6">
+                        <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h4 class="text-2xl font-semibold mb-2">Employee Tracking</h4>
+                    <p class="text-gray-600">Easily assign and track assets assigned to each employee.</p>
+                </div>
+                <div class="p-8 bg-white rounded-xl shadow-2xl">
+                    <div class="flex items-center justify-center h-16 w-16 rounded-full bg-blue-100 text-blue-900 mx-auto mb-6">
+                        <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    </div>
+                    <h4 class="text-2xl font-semibold mb-2">Asset Management</h4>
+                    <p class="text-gray-600">Keep a detailed record of all your company's assets.</p>
+                </div>
+                <div class="p-8 bg-white rounded-xl shadow-2xl">
+                    <div class="flex items-center justify-center h-16 w-16 rounded-full bg-blue-100 text-blue-900 mx-auto mb-6">
+                        <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </div>
+                    <h4 class="text-2xl font-semibold mb-2">Detailed Reports</h4>
+                    <p class="text-gray-600">Generate reports to get insights into your asset distribution.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2025 Asset Management System. All rights reserved.</p>
+        </div>
+    </footer>
+
+</body>
+</html>

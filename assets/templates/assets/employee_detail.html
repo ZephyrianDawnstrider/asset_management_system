@@ -1,0 +1,232 @@
+{% extends 'assets/base.html' %}
+
+{% block title %}Employee Details - {{ employee.name }}{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-xl shadow-2xl p-8">
+    <div class="flex justify-between items-center mb-8">
+        <div>
+            <h2 class="text-3xl font-bold text-gray-800">{{ employee.name }}</h2>
+            <p class="text-gray-600">{{ employee.employee_id }}</p>
+        </div>
+        <div class="space-x-3">
+            <a href="{% url 'employee_overview' %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Back</a>
+            <button onclick="openDeleteModal()" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">Delete Employee</button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+        <div class="bg-gray-50 p-6 rounded-lg">
+            <h3 class="text-lg font-semibold mb-4 text-gray-700">Employee Information</h3>
+            <p class="text-gray-800"><strong>Department:</strong> {{ employee.department }}</p>
+            <p class="text-gray-800"><strong>Designation:</strong> {{ employee.designation }}</p>
+            <p class="text-gray-800"><strong>Start Date:</strong> {{ employee.start_date }}</p>
+        </div>
+        <div class="bg-gray-50 p-6 rounded-lg">
+            <h3 class="text-lg font-semibold mb-4 text-gray-700">Assigned Assets Summary</h3>
+            <p class="text-gray-800"><strong>Number of assets:</strong> {{ assigned_assets.count }}</p>
+            <p class="text-gray-800"><strong>Asset types:</strong> {{ assigned_types|length }}</p>
+        </div>
+    </div>
+
+    <h3 class="text-2xl font-bold text-gray-800 mb-4">Assigned Assets</h3>
+    {% if assigned_assets %}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {% for asset in assigned_assets %}
+                <div class="border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition duration-200">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h4 class="font-semibold text-gray-800">{{ asset.asset_name }}</h4>
+                            <p class="text-gray-600">{{ asset.asset_type.name }}</p>
+                            <p class="text-sm text-gray-500">ID: {{ asset.unique_identifier }}</p>
+                            {% if asset.details %}
+                                <p class="text-sm mt-2 text-gray-700">{{ asset.details }}</p>
+                            {% endif %}
+                        </div>
+                        <button onclick="unassignAsset({{ asset.id }}, '{{ asset.asset_name }}')" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-3 py-1 text-sm transition duration-200">Unassign</button>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="text-gray-500 mb-8">No assets assigned.</p>
+    {% endif %}
+
+    <h3 class="text-2xl font-bold text-gray-800 mb-4">Asset Assignment by Type</h3>
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white border border-gray-200 rounded-lg">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asset Type</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for asset_type in asset_types %}
+                    <tr class="hover:bg-blue-50 transition duration-200">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ asset_type.name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% if asset_type.id in assigned_types %}
+                                <span class="text-green-600 font-semibold">✓ Assigned</span>
+                            {% else %}
+                                <span class="text-red-600 font-semibold">× Not Assigned</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                             {% if asset_type.id not in assigned_types and asset_type.id in unassigned_by_type %}
+                                <button onclick="openAssignModal('{{ employee.employee_id }}', '{{ asset_type.id }}', '{{ asset_type.name }}')" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-3 py-1 text-sm transition duration-200">Assign</button>
+                            {% else %}
+                                <span class="text-gray-500 text-sm">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Assign Asset Modal -->
+<div id="assignModal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden z-50 transition-opacity duration-300 opacity-0">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 transform transition-all scale-95 opacity-0" id="assignModalContent">
+        <h3 id="assignTitle" class="text-2xl font-bold text-gray-800 mb-6">Assign Asset</h3>
+        <form id="assignForm" class="space-y-6">
+            {% csrf_token %}
+            <input type="hidden" name="employee_id" id="modal_employee_id">
+            <input type="hidden" name="asset_type_id" id="modal_asset_type_id">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Available Unassigned Assets</label>
+                <select name="asset_id" id="modal_asset_select" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600" required>
+                    <option value="">Select an asset</option>
+                </select>
+            </div>
+            <div class="flex justify-end space-x-4 pt-4">
+                <button type="button" onclick="closeAssignModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200">Assign</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden z-50 transition-opacity duration-300 opacity-0">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 transform transition-all scale-95 opacity-0" id="deleteModalContent">
+        <h3 class="text-2xl font-bold text-gray-800 mb-4">Delete Employee</h3>
+        <p class="text-gray-600 mb-6">This will unassign all assets from {{ employee.name }} and delete the employee record. This action cannot be undone.</p>
+        <form method="post" action="{% url 'employee_delete' employee.employee_id %}">
+            {% csrf_token %}
+            <div class="flex justify-end space-x-4">
+                <button type="button" onclick="closeDeleteModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</button>
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200">Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openAssignModal(employeeId, assetTypeId, assetTypeName) {
+    const modal = document.getElementById('assignModal');
+    const modalContent = document.getElementById('assignModalContent');
+    document.getElementById('modal_employee_id').value = employeeId;
+    document.getElementById('modal_asset_type_id').value = assetTypeId;
+    document.getElementById('assignTitle').textContent = `Assign ${assetTypeName} to Employee`;
+
+    fetch(`/api/unassigned-assets/${assetTypeId}/`)
+        .then(response => response.json())
+        .then(assets => {
+            const select = document.getElementById('modal_asset_select');
+            select.innerHTML = '<option value="">Select an asset</option>';
+            assets.forEach(asset => {
+                const option = document.createElement('option');
+                option.value = asset.id;
+                option.textContent = `${asset.asset_name} (${asset.unique_identifier})`;
+                select.appendChild(option);
+            });
+        });
+
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        modalContent.classList.remove('scale-95', 'opacity-0');
+    }, 10);
+}
+
+function closeAssignModal() {
+    const modal = document.getElementById('assignModal');
+    const modalContent = document.getElementById('assignModalContent');
+    modal.classList.add('opacity-0');
+    modalContent.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => modal.classList.add('hidden'), 300);
+}
+
+function openDeleteModal() {
+    const modal = document.getElementById('deleteModal');
+    const modalContent = document.getElementById('deleteModalContent');
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        modalContent.classList.remove('scale-95', 'opacity-0');
+    }, 10);
+}
+
+function closeDeleteModal() {
+    const modal = document.getElementById('deleteModal');
+    const modalContent = document.getElementById('deleteModalContent');
+    modal.classList.add('opacity-0');
+    modalContent.classList.add('scale-95', 'opacity-0');
+    setTimeout(() => modal.classList.add('hidden'), 300);
+}
+
+function unassignAsset(assetId, assetName) {
+    if (confirm(`Are you sure you want to unassign ${assetName}?`)) {
+        fetch(`/unassign-asset/${assetId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        });
+    }
+}
+
+document.getElementById('assignForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    fetch('{% url "assign_asset_to_employee" %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closeAssignModal();
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    });
+});
+
+window.onclick = function(event) {
+    if (event.target == document.getElementById('assignModal')) {
+        closeAssignModal();
+    }
+    if (event.target == document.getElementById('deleteModal')) {
+        closeDeleteModal();
+    }
+}
+</script>
+
+{% endblock %}

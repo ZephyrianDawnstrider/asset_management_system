@@ -80,6 +80,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unique Identifier</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
@@ -102,10 +103,16 @@
                                     -
                                 {% endif %}
                             </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <form method="post" action="{% url 'asset_soft_delete' asset.pk %}" style="display:inline;" onsubmit="return confirm('Are you sure you want to soft delete this asset?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Delete</button>
+                                </form>
+                            </td>
                         </tr>
                     {% empty %}
                         <tr>
-                            <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">No assets found.</td>
+                            <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">No assets found.</td>
                         </tr>
                     {% endfor %}
                 </tbody>

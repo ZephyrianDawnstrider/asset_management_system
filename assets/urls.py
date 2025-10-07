@@ -11,7 +11,11 @@ urlpatterns = [
     path('asset-types/', views.AssetTypeListView.as_view(), name='assettype_list'),
     path('asset-types/new/', views.AssetTypeCreateView.as_view(), name='assettype_create'),
     path('asset-types/<int:pk>/edit/', views.AssetTypeUpdateView.as_view(), name='assettype_update'),
-    path('asset-types/<int:pk>/delete/', views.AssetTypeDeleteView.as_view(), name='assettype_delete'),
+    path('asset-types/<int:pk>/soft-delete/', views.AssetTypeSoftDeleteView.as_view(), name='assettype_soft_delete'),
+
+    # Asset CRUD
+    path('assets/', views.AssetListView.as_view(), name='asset_list'),
+    path('assets/<int:pk>/soft-delete/', views.AssetSoftDeleteView.as_view(), name='asset_soft_delete'),
 
     # Asset Assignment
     path('assets/assign/', views.AssetAssignmentView.as_view(), name='asset_assign'),
@@ -21,6 +25,7 @@ urlpatterns = [
 
     # Employee Detail
     path('employees/<str:employee_id>/', views.EmployeeAssetDetailView.as_view(), name='employee_detail'),
+    path('employees/<str:employee_id>/soft-delete/', views.EmployeeSoftDeleteView.as_view(), name='employee_soft_delete'),
     path('employees/<str:employee_id>/delete/', views.EmployeeDeleteView.as_view(), name='employee_delete'),
 
     # Assignment actions

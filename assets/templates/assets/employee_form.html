@@ -76,13 +76,24 @@
                     {% for error in form.exit_date.errors %}{{ error }}{% endfor %}
                 </div>
             {% endif %}
-            <p class="text-sm text-gray-500 mt-1">Setting a future exit date will soft delete the employee and unassign all assets.</p>
+            <p class="text-sm text-gray-500 mt-1">Setting an exit date in the past or present will immediately soft delete the employee and unassign all assets. For future dates, it will be soft deleted on that date.</p>
+            {% comment %} <p class="text-sm text-gray-500 mt-1">Setting a future exit date will soft delete the employee and unassign all assets.</p> {% endcomment %}
         </div>
         {% endif %}
 
-        <div class="flex justify-end space-x-4 pt-4">
-            <a href="{% url 'employee_list' %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</a>
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">{% if object %}Update{% else %}Add{% endif %} Employee</button>
+        <div class="flex justify-between items-center pt-4">
+            {% if object and object.is_active %}
+                <form method="post" action="{% url 'employee_soft_delete' object.employee_id %}" onsubmit="return confirm('Are you sure you want to soft delete this employee? This will unassign all their assets.')">
+                    {% csrf_token %}
+                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Delete Employee</button>
+                </form>
+            {% else %}
+                <div></div>
+            {% endif %}
+            <div class="flex space-x-4">
+                <a href="{% url 'employee_list' %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</a>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">{% if object %}Update{% else %}Add{% endif %} Employee</button>
+            </div>
         </div>
     </form>
 </div>

@@ -49,6 +49,25 @@ class EmployeeCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         form.fields['start_date'].widget.attrs.update({'type': 'date'})
         return form
 
+    def form_valid(self, form):
+        employee_id = form.cleaned_data['employee_id']
+        existing_employee = Employee.objects.filter(employee_id=employee_id).first()
+        if existing_employee:
+            if not existing_employee.is_active:
+                # Reactivate and update
+                existing_employee.name = form.cleaned_data['name']
+                existing_employee.department = form.cleaned_data['department']
+                existing_employee.designation = form.cleaned_data['designation']
+                existing_employee.start_date = form.cleaned_data['start_date']
+                existing_employee.is_active = True
+                existing_employee.save()
+                return redirect(self.success_url)
+            else:
+                # Already active, perhaps error or update
+                form.add_error('employee_id', 'Employee with this ID already exists and is active.')
+                return self.form_invalid(form)
+        return super().form_valid(form)
+
 class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Employee
     template_name = 'assets/employee_form.html'
@@ -68,11 +87,12 @@ class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         employee = form.save(commit=False)
         if employee.exit_date:
             from django.utils import timezone
-            if employee.exit_date > timezone.now().date():
-                # Future exit date: soft delete
+            if employee.exit_date <= timezone.now().date():
+                # Past or present: soft delete immediately
                 employee.is_active = False
                 # Unassign all assets
                 Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
+        # For future dates, just save; daily command will handle soft delete
         employee.save()
         return super().form_valid(form)
 
@@ -84,6 +104,9 @@ class AssetTypeListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
 
     def test_func(self):
         return self.request.user.is_staff
+
+    def get_queryset(self):
+        return AssetType.objects.filter(is_active=True)
 
 class AssetTypeCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = AssetType
@@ -103,13 +126,38 @@ class AssetTypeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def test_func(self):
         return self.request.user.is_staff
 
-class AssetTypeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
-    model = AssetType
-    template_name = 'assets/assettype_confirm_delete.html'
-    success_url = reverse_lazy('assettype_list')
+class AssetTypeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def post(self, request, pk):
+        asset_type = get_object_or_404(AssetType, pk=pk)
+        if asset_type.is_active:
+            asset_type.is_active = False
+            asset_type.save()
+        return redirect('assettype_list')
+
+class AssetListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
+    model = Asset
+    template_name = 'assets/asset_list.html'
+    context_object_name = 'assets'
 
     def test_func(self):
         return self.request.user.is_staff
+
+    def get_queryset(self):
+        return Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
+
+class AssetSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def post(self, request, pk):
+        asset = get_object_or_404(Asset, pk=pk)
+        if asset.is_active:
+            asset.is_active = False
+            asset.save()
+        return redirect('asset_list')
 
 # Asset Assignment View
 class AssetAssignmentView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
@@ -123,8 +171,8 @@ class AssetAssignmentView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['asset_types'] = AssetType.objects.all()
-        context['all_assets'] = Asset.objects.all().select_related('asset_type', 'assigned_to')
+        context['asset_types'] = AssetType.objects.filter(is_active=True)
+        context['all_assets'] = Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
         return context
 
 # Employee Overview (Tickmark Matrix)
@@ -141,9 +189,9 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, ListVie
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        asset_types = AssetType.objects.all()
+        asset_types = AssetType.objects.filter(is_active=True)
         # Fetch all assignments
-        assignments = Asset.objects.filter(assigned_to__isnull=False).select_related('assigned_to', 'asset_type')
+        assignments = Asset.objects.filter(assigned_to__isnull=False, is_active=True).select_related('assigned_to', 'asset_type')
         # Create lookup: employee_id -> set of asset_type_ids
         assignment_lookup = {}
         for asset in assignments:
@@ -177,14 +225,14 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         employee = self.get_object()
-        assigned_assets = Asset.objects.filter(assigned_to=employee).select_related('asset_type')
+        assigned_assets = Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type')
         context['assigned_assets'] = assigned_assets
 
         # Unassigned assets by type for assignment
-        asset_types = AssetType.objects.all()
+        asset_types = AssetType.objects.filter(is_active=True)
         unassigned_by_type = {}
         for at in asset_types:
-            unassigned = Asset.objects.filter(asset_type=at, assigned_to__isnull=True).order_by('asset_name')
+            unassigned = Asset.objects.filter(asset_type=at, assigned_to__isnull=True, is_active=True).order_by('asset_name')
             unassigned_by_type[at.id] = unassigned
         context['unassigned_by_type'] = unassigned_by_type
         context['asset_types'] = asset_types
@@ -194,6 +242,19 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         context['assigned_types'] = assigned_types
 
         return context
+
+class EmployeeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def post(self, request, employee_id):
+        employee = get_object_or_404(Employee, employee_id=employee_id)
+        if employee.is_active:
+            # Soft delete: set inactive and unassign assets
+            employee.is_active = False
+            employee.save()
+            Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
+        return redirect('employee_list')
 
 class EmployeeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     model = Employee
@@ -222,7 +283,7 @@ class AssignAssetToEmployeeView(LoginRequiredMixin, UserPassesTestMixin, View):
         employee_id = request.POST.get('employee_id')
         asset_id = request.POST.get('asset_id')
         if employee_id and asset_id:
-            employee = get_object_or_404(Employee, employee_id=employee_id)
+            employee = get_object_or_404(Employee, employee_id=employee_id, is_active=True)
             asset = get_object_or_404(Asset, id=asset_id)
             if asset.assigned_to is None:
                 asset.assigned_to = employee
@@ -244,5 +305,5 @@ class UnassignAssetView(LoginRequiredMixin, UserPassesTestMixin, View):
 
 class UnassignedAssetsAPIView(View):
     def get(self, request, asset_type_id):
-        unassigned = Asset.objects.filter(asset_type_id=asset_type_id, assigned_to__isnull=True).values('id', 'asset_name', 'unique_identifier')
+        unassigned = Asset.objects.filter(asset_type_id=asset_type_id, assigned_to__isnull=True, is_active=True).values('id', 'asset_name', 'unique_identifier')
         return JsonResponse(list(unassigned), safe=False)

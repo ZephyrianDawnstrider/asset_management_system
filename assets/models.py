@@ -19,6 +19,7 @@ class AssetType(models.Model):
     name = models.CharField(max_length=255)
     identification_type_label = models.CharField(max_length=255)
     object_description = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
@@ -29,6 +30,7 @@ class Asset(models.Model):
     asset_name = models.CharField(max_length=255)
     assigned_to = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     details = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         unique_together = ('asset_type', 'unique_identifier')

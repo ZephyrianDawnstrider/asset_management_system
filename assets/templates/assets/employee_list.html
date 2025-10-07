@@ -36,6 +36,10 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                             <a href="{% url 'employee_update' employee.pk %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Edit</a>
                             <a href="{% url 'employee_detail' employee.employee_id %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">View Assets</a>
+                            <form method="post" action="{% url 'employee_soft_delete' employee.employee_id %}" style="display:inline;" onsubmit="return confirm('Are you sure you want to soft delete this employee? This will unassign all their assets.')">
+                                {% csrf_token %}
+                                <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Delete</button>
+                            </form>
                         </td>
                     </tr>
                 {% empty %}

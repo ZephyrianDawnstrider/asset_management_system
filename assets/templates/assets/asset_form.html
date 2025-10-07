@@ -1,0 +1,76 @@
+{% extends 'assets/base.html' %}
+
+{% block title %}Edit Asset{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white rounded-xl shadow-2xl p-8">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">Edit Asset</h1>
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <p class="text-sm text-gray-600 mb-4">Fields marked with * are mandatory.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <label for="{{ form.asset_type.id_for_label }}" class="block text-sm font-medium text-gray-700">Asset Type *</label>
+                <select name="{{ form.asset_type.html_name }}" id="{{ form.asset_type.id_for_label }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600" required>
+                    <option value="">Select Asset Type</option>
+                    {% for asset_type in asset_types %}
+                        <option value="{{ asset_type.id }}" {% if asset_type.id == form.asset_type.value %}selected{% endif %}>{{ asset_type.name }}</option>
+                    {% endfor %}
+                </select>
+                {% if form.asset_type.errors %}
+                    <div class="text-red-600 text-sm mt-1">{% for error in form.asset_type.errors %}{{ error }}{% endfor %}</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.asset_name.id_for_label }}" class="block text-sm font-medium text-gray-700">Asset Name *</label>
+                <input id="{{ form.asset_name.id_for_label }}" name="{{ form.asset_name.html_name }}" type="text" value="{{ form.asset_name.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
+                {% if form.asset_name.errors %}
+                    <div class="text-red-600 text-sm mt-1">{% for error in form.asset_name.errors %}{{ error }}{% endfor %}</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.unique_identifier.id_for_label }}" class="block text-sm font-medium text-gray-700">Unique Identifier *</label>
+                <input id="{{ form.unique_identifier.id_for_label }}" name="{{ form.unique_identifier.html_name }}" type="text" value="{{ form.unique_identifier.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
+                {% if form.unique_identifier.errors %}
+                    <div class="text-red-600 text-sm mt-1">{% for error in form.unique_identifier.errors %}{{ error }}{% endfor %}</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.assigned_to.id_for_label }}" class="block text-sm font-medium text-gray-700">Assigned To</label>
+                <select name="{{ form.assigned_to.html_name }}" id="{{ form.assigned_to.id_for_label }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
+                    <option value="">Select Employee</option>
+                    {% for employee in employees %}
+                        <option value="{{ employee.id }}" {% if employee.id == form.assigned_to.value %}selected{% endif %}>{{ employee.name }}</option>
+                    {% endfor %}
+                </select>
+                {% if form.assigned_to.errors %}
+                    <div class="text-red-600 text-sm mt-1">{% for error in form.assigned_to.errors %}{{ error }}{% endfor %}</div>
+                {% endif %}
+            </div>
+
+            <div class="md:col-span-2">
+                <label for="{{ form.details.id_for_label }}" class="block text-sm font-medium text-gray-700">Details</label>
+                <textarea id="{{ form.details.id_for_label }}" name="{{ form.details.html_name }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">{{ form.details.value|default:'' }}</textarea>
+                {% if form.details.errors %}
+                    <div class="text-red-600 text-sm mt-1">{% for error in form.details.errors %}{{ error }}{% endfor %}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if form.non_field_errors %}
+            <div class="text-red-600 text-sm p-3 bg-red-50 rounded-lg">
+                {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="flex justify-end space-x-4 pt-4">
+            <a href="{% url 'asset_assign' %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Cancel</a>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200">Update Asset</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

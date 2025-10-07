@@ -8,6 +8,7 @@
 
     <form method="post" class="space-y-6">
         {% csrf_token %}
+        <p class="text-sm text-gray-600 mb-4">Fields marked with * are mandatory.</p>
 
         {% if form.non_field_errors %}
             <div class="text-red-600 text-sm p-3 bg-red-50 rounded-lg">
@@ -18,7 +19,7 @@
         {% endif %}
 
         <div>
-            <label for="{{ form.employee_id.id_for_label }}" class="block text-sm font-medium text-gray-700">Employee ID</label>
+            <label for="{{ form.employee_id.id_for_label }}" class="block text-sm font-medium text-gray-700">Employee ID *</label>
             <input id="{{ form.employee_id.id_for_label }}" name="{{ form.employee_id.html_name }}" type="text" value="{{ form.employee_id.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.employee_id.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -28,7 +29,7 @@
         </div>
 
         <div>
-            <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">Name</label>
+            <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">Name *</label>
             <input id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" type="text" value="{{ form.name.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.name.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -38,7 +39,7 @@
         </div>
 
         <div>
-            <label for="{{ form.department.id_for_label }}" class="block text-sm font-medium text-gray-700">Department</label>
+            <label for="{{ form.department.id_for_label }}" class="block text-sm font-medium text-gray-700">Department *</label>
             <input id="{{ form.department.id_for_label }}" name="{{ form.department.html_name }}" type="text" value="{{ form.department.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.department.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -48,7 +49,7 @@
         </div>
 
         <div>
-            <label for="{{ form.designation.id_for_label }}" class="block text-sm font-medium text-gray-700">Designation</label>
+            <label for="{{ form.designation.id_for_label }}" class="block text-sm font-medium text-gray-700">Designation *</label>
             <input id="{{ form.designation.id_for_label }}" name="{{ form.designation.html_name }}" type="text" value="{{ form.designation.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.designation.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -58,7 +59,7 @@
         </div>
 
         <div>
-            <label for="{{ form.start_date.id_for_label }}" class="block text-sm font-medium text-gray-700">Start Date</label>
+            <label for="{{ form.start_date.id_for_label }}" class="block text-sm font-medium text-gray-700">Start Date *</label>
             <input id="{{ form.start_date.id_for_label }}" name="{{ form.start_date.html_name }}" type="date" value="{{ form.start_date.value|date:'Y-m-d' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.start_date.errors %}
                 <div class="text-red-600 text-sm mt-1">

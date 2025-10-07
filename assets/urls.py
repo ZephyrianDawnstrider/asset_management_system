@@ -15,6 +15,7 @@ urlpatterns = [
 
     # Asset CRUD
     path('assets/', views.AssetListView.as_view(), name='asset_list'),
+    path('assets/<int:pk>/edit/', views.AssetUpdateView.as_view(), name='asset_update'),
     path('assets/<int:pk>/soft-delete/', views.AssetSoftDeleteView.as_view(), name='asset_soft_delete'),
 
     # Asset Assignment

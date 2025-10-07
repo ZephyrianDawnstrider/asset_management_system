@@ -1,4 +1,4 @@
-{% extends 'assets/base.html' %}
+    {% extends 'assets/base.html' %}
 
 {% block title %}{% if object %}Edit{% else %}Create{% endif %} Asset Type{% endblock %}
 
@@ -7,8 +7,9 @@
     <h2 class="text-2xl font-bold text-gray-800 mb-6">{% if object %}Edit{% else %}Create{% endif %} Asset Type</h2>
     <form method="post" class="space-y-6">
         {% csrf_token %}
+        <p class="text-sm text-gray-600 mb-4">Fields marked with * are mandatory.</p>
         <div>
-            <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">Name</label>
+            <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">Name *</label>
             <input id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" type="text" value="{{ form.name.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.name.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -17,7 +18,7 @@
             {% endif %}
         </div>
         <div>
-            <label for="{{ form.identification_type_label.id_for_label }}" class="block text-sm font-medium text-gray-700">Identification Type Label</label>
+            <label for="{{ form.identification_type_label.id_for_label }}" class="block text-sm font-medium text-gray-700">Identification Type Label *</label>
             <input id="{{ form.identification_type_label.id_for_label }}" name="{{ form.identification_type_label.html_name }}" type="text" value="{{ form.identification_type_label.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.identification_type_label.errors %}
                 <div class="text-red-600 text-sm mt-1">
@@ -26,7 +27,7 @@
             {% endif %}
         </div>
         <div>
-            <label for="{{ form.object_description.id_for_label }}" class="block text-sm font-medium text-gray-700">Object Description</label>
+            <label for="{{ form.object_description.id_for_label }}" class="block text-sm font-medium text-gray-700">Object Description *</label>
             <input id="{{ form.object_description.id_for_label }}" name="{{ form.object_description.html_name }}" type="text" value="{{ form.object_description.value|default:'' }}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-600 focus:border-blue-600">
             {% if form.object_description.errors %}
                 <div class="text-red-600 text-sm mt-1">

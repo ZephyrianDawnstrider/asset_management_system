@@ -5,7 +5,10 @@
 {% block content %}
 <div class="bg-white rounded-xl shadow-2xl p-8">
     <div class="flex justify-between items-center mb-6">
-        <h2 class="text-2xl font-bold text-gray-800">Asset Types</h2>
+        <div>
+            <h3 class="text-2xl font-bold text-gray-800">Asset Types</h3>
+            <p class="mt-1 text-sm text-gray-600">Manage asset type records.</p>
+        </div>
         <a href="{% url 'assettype_create' %}" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">Add New</a>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

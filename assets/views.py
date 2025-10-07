@@ -148,6 +148,26 @@ class AssetListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
     def get_queryset(self):
         return Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
 
+class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    model = Asset
+    template_name = 'assets/asset_form.html'
+    fields = ['asset_type', 'asset_name', 'unique_identifier', 'assigned_to', 'details']
+    success_url = reverse_lazy('asset_assign')
+
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        form.fields['assigned_to'].queryset = Employee.objects.filter(is_active=True)
+        return form
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['asset_types'] = AssetType.objects.filter(is_active=True)
+        context['employees'] = Employee.objects.filter(is_active=True)
+        return context
+
 class AssetSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
         return self.request.user.is_staff
@@ -157,7 +177,7 @@ class AssetSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
         if asset.is_active:
             asset.is_active = False
             asset.save()
-        return redirect('asset_list')
+        return redirect('asset_assign')
 
 # Asset Assignment View
 class AssetAssignmentView(LoginRequiredMixin, UserPassesTestMixin, CreateView):

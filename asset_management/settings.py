@@ -133,10 +133,10 @@ if PRODUCTION:
             raise ImproperlyConfigured(
                 "DATABASE_URL sslmode must be require, verify-ca, or verify-full in production."
             )
-    sslrootcert = ssl_params.get("sslrootcert")
-    if sslrootcert is not None and not sslrootcert:
+    url_sslrootcert = ssl_params.get("sslrootcert")
+    if url_sslrootcert is not None and not url_sslrootcert:
         raise ImproperlyConfigured("DATABASE_URL sslrootcert must not be empty when provided.")
-    system_roots = sslrootcert is not None and sslrootcert.lower() == "system"
+    system_roots = url_sslrootcert is not None and url_sslrootcert.lower() == "system"
     if system_roots and explicit_sslmode in {"require", "verify-ca"}:
         raise ImproperlyConfigured("DATABASE_URL sslrootcert=system requires sslmode=verify-full.")
     required_role = ASSET_DB_RUNTIME_ROLE if DJANGO_DB_ROLE == "runtime" else ASSET_DB_MIGRATION_ROLE
@@ -156,15 +156,14 @@ if PRODUCTION:
         raise ImproperlyConfigured("DATABASE_URL could not be parsed as a PostgreSQL connection.") from None
     if DATABASES["default"].get("ENGINE") != "django.db.backends.postgresql":
         raise ImproperlyConfigured("DATABASE_URL must configure the PostgreSQL backend.")
-    # libpq18 supports sslrootcert=system and requires verify-full with system roots.
-    # Without an explicit CA setting, require preserves the preview's TLS-encrypted
-    # connection behavior; callers may request the stronger verify-ca/verify-full modes.
+    # Use Supabase's packaged CA and hostname verification by default. Explicit URL
+    # settings remain honored, with sslrootcert=system requiring verify-full in libpq18.
+    sslrootcert = url_sslrootcert or str(BASE_DIR / "certs" / "supabase-prod-ca-2021.crt")
     DATABASES["default"].setdefault("OPTIONS", {}).update({
-        "sslmode": explicit_sslmode or ("verify-full" if system_roots else "require"),
+        "sslmode": explicit_sslmode or "verify-full",
         "options": f"-c search_path={ASSET_DB_SCHEMA},pg_catalog",
+        "sslrootcert": "system" if system_roots else sslrootcert,
     })
-    if sslrootcert is not None:
-        DATABASES["default"]["OPTIONS"]["sslrootcert"] = "system" if system_roots else sslrootcert
     # Database authentication is intentionally split: the WSGI process may only use
     # the restricted app login; explicit `manage.py migrate` uses the schema owner.
 else:

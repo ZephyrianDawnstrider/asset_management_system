@@ -59,16 +59,22 @@ class ProductionSettingsTests(SimpleTestCase):
         self.assertTrue(settings["csrf_secure"])
         self.assertGreater(settings["hsts"], 0)
         self.assertEqual(settings["static"], "whitenoise.storage.CompressedManifestStaticFilesStorage")
-        self.assertEqual(settings["db_options"]["sslmode"], "require")
+        self.assertEqual(settings["db_options"]["sslmode"], "verify-full")
+        self.assertEqual(
+            settings["db_options"]["sslrootcert"],
+            os.path.join(PROJECT_ROOT, "certs", "supabase-prod-ca-2021.crt"),
+        )
         self.assertEqual(settings["db_options"]["options"], "-c search_path=assets_portfolio,pg_catalog")
 
     def test_production_preserves_explicit_tls_modes_and_system_roots(self):
         base_url = GOOD_ENV["DATABASE_URL"]
+        bundled_root = os.path.join(PROJECT_ROOT, "certs", "supabase-prod-ca-2021.crt")
         cases = [
-            ("?sslmode=verify-full", "verify-full", None),
-            ("?sslmode=verify-ca", "verify-ca", None),
+            ("?sslmode=verify-full", "verify-full", bundled_root),
+            ("?sslmode=verify-ca", "verify-ca", bundled_root),
             ("?sslrootcert=system", "verify-full", "system"),
             ("?sslmode=verify-full&sslrootcert=system", "verify-full", "system"),
+            ("?sslrootcert=%2Fcustom%2Froot.crt", "verify-full", "/custom/root.crt"),
         ]
         for query, expected_mode, expected_root in cases:
             with self.subTest(query=query):
@@ -76,10 +82,7 @@ class ProductionSettingsTests(SimpleTestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 options = json.loads(result.stdout)["db_options"]
                 self.assertEqual(options["sslmode"], expected_mode)
-                if expected_root is None:
-                    self.assertNotIn("sslrootcert", options)
-                else:
-                    self.assertEqual(options["sslrootcert"], expected_root)
+                self.assertEqual(options["sslrootcert"], expected_root)
 
     def test_production_rejects_downgraded_or_ambiguous_tls_urls(self):
         base_url = GOOD_ENV["DATABASE_URL"]

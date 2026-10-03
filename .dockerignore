@@ -12,6 +12,8 @@
 !assets/templates/**
 !assets/static/
 !assets/static/**
+!certs/
+!certs/supabase-prod-ca-2021.crt
 !build.sh
 !start.sh
 

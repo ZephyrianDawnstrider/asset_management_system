@@ -14,6 +14,7 @@ RUN python -m pip install -r requirements.txt gunicorn==26.2.0
 COPY manage.py ./manage.py
 COPY asset_management/ ./asset_management/
 COPY assets/ ./assets/
+COPY certs/supabase-prod-ca-2021.crt ./certs/supabase-prod-ca-2021.crt
 COPY build.sh start.sh ./
 RUN chmod 0555 ./build.sh ./start.sh \
     && ./build.sh \

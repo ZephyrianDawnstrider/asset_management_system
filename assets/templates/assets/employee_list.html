@@ -1,54 +1,12 @@
 {% extends 'assets/base.html' %}
-
-{% block title %}Employee Management{% endblock %}
-
+{% block title %}Employees{% endblock %}
+{% block page_label %}Employees{% endblock %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-2xl p-6">
-    <div class="flex justify-between items-center mb-6">
-        <div>
-            <h3 class="text-2xl font-bold text-gray-800">Employees</h3>
-            <p class="mt-1 text-sm text-gray-600">Manage employee records.</p>
-        </div>
-        <a href="{% url 'employee_create' %}" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">Add New Employee</a>
-    </div>
-    <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee ID</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Designation</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exit Date</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                {% for employee in employees %}
-                    <tr class="hover:bg-blue-50 transition duration-200">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ employee.employee_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ employee.name }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ employee.department }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ employee.designation }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ employee.start_date }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ employee.exit_date|default:"-" }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                            <a href="{% url 'employee_update' employee.pk %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Edit</a>
-                            <a href="{% url 'employee_detail' employee.employee_id %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">View Assets</a>
-                            <form method="post" action="{% url 'employee_soft_delete' employee.employee_id %}" style="display:inline;" onsubmit="return confirm('Are you sure you want to soft delete this employee? This will unassign all their assets.')">
-                                {% csrf_token %}
-                                <button type="submit" class="bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500">No employees found.</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
+<div class="page-heading"><div><p class="eyebrow">People and custody</p><h1>Employees</h1><p>Maintain the active employee directory and review each person’s equipment record.</p></div><a class="button button-primary" href="{% url 'employee_create' %}">+ Add employee</a></div>
+<section class="card"><div class="toolbar"><p>{{ employees|length }} active employee{{ employees|length|pluralize }}</p><label class="search-label"><span class="sr-only">Filter employees</span><input class="search-input" type="search" data-table-search="employee-table" placeholder="Filter by name, ID, or department"></label></div>
+<div class="table-wrap"><table id="employee-table"><thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Designation</th><th scope="col">Start date</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for employee in employees %}<tr><td><div class="person-cell"><span class="person-initial" aria-hidden="true">{{ employee.name|slice:":1"|upper }}</span><span><strong>{{ employee.name }}</strong><small>{{ employee.employee_id }}</small></span></div></td><td>{{ employee.department }}</td><td>{{ employee.designation }}</td><td>{{ employee.start_date|date:"M j, Y" }}</td><td><div class="table-actions"><a class="button button-secondary button-small" href="{% url 'employee_detail' employee.employee_id %}">View record</a><a class="button button-secondary button-small" href="{% url 'employee_update' employee.pk %}">Edit</a><form method="post" action="{% url 'employee_soft_delete' employee.employee_id %}" onsubmit="return confirm('Deactivate this employee and return assigned equipment to the available pool?')">{% csrf_token %}<button type="submit" class="button button-danger button-small">Deactivate</button></form></div></td></tr>
+{% empty %}<tr><td colspan="5" class="empty-state"><strong>No active employees</strong>Add an employee to begin tracking equipment custody.</td></tr>{% endfor %}
+</tbody></table></div></section>
 {% endblock %}
+{% block scripts %}<script>{document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('[data-table-search]').forEach(input=>{const table=document.getElementById(input.dataset.tableSearch);input.addEventListener('input',()=>{const query=input.value.trim().toLowerCase();table.querySelectorAll('tbody tr').forEach(row=>row.hidden=!row.textContent.toLowerCase().includes(query))})})})}</script>{% endblock %}

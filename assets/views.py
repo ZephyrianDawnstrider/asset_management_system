@@ -1,13 +1,19 @@
+import csv
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView, DetailView, TemplateView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from .models import Employee, AssetType, Asset
+from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.http import JsonResponse, HttpResponse
+from django.utils import timezone
+from .models import Employee, AssetType, Asset, AssignmentHistory
 from .forms import AssetAssignmentForm, AssetAssignmentToEmployeeForm
-from django.http import JsonResponse
 from django.views import View
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
+from .services import change_asset_assignment, deactivate_asset, deactivate_employee
+
 
 class HomeView(TemplateView):
     template_name = 'assets/landing.html'
@@ -85,16 +91,15 @@ class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
     def form_valid(self, form):
         employee = form.save(commit=False)
+        editable_fields = ['employee_id', 'name', 'department', 'designation', 'start_date', 'exit_date']
         if employee.exit_date:
-            from django.utils import timezone
             if employee.exit_date <= timezone.now().date():
-                # Past or present: soft delete immediately
-                employee.is_active = False
-                # Unassign all assets
-                Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
-        # For future dates, just save; daily command will handle soft delete
-        employee.save()
-        return super().form_valid(form)
+                with transaction.atomic():
+                    employee.save(update_fields=editable_fields)
+                    deactivate_employee(employee.pk, self.request.user, employee.exit_date)
+                return redirect(self.success_url)
+        employee.save(update_fields=editable_fields)
+        return redirect(self.success_url)
 
 # AssetType CRUD Views
 class AssetTypeListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
@@ -133,6 +138,9 @@ class AssetTypeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request, pk):
         asset_type = get_object_or_404(AssetType, pk=pk)
         if asset_type.is_active:
+            if Asset.objects.filter(asset_type=asset_type, is_active=True).exists():
+                messages.error(request, 'Return and deactivate every asset of this type before deactivating the type.')
+                return redirect('assettype_list')
             asset_type.is_active = False
             asset_type.save()
         return redirect('assettype_list')
@@ -151,7 +159,7 @@ class AssetListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
 class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Asset
     template_name = 'assets/asset_form.html'
-    fields = ['asset_type', 'asset_name', 'unique_identifier', 'assigned_to', 'details']
+    fields = ['asset_type', 'asset_name', 'unique_identifier', 'details']
     success_url = reverse_lazy('asset_assign')
 
     def test_func(self):
@@ -159,7 +167,9 @@ class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
-        form.fields['assigned_to'].queryset = Employee.objects.filter(is_active=True)
+        form.fields['asset_type'].queryset = AssetType.objects.filter(is_active=True)
+        if self.object.assigned_to_id:
+            form.fields['asset_type'].disabled = True
         return form
 
     def get_context_data(self, **kwargs):
@@ -175,8 +185,17 @@ class AssetSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request, pk):
         asset = get_object_or_404(Asset, pk=pk)
         if asset.is_active:
-            asset.is_active = False
-            asset.save()
+            if asset.assigned_to_id:
+                try:
+                    expected_employee_id = int(request.POST.get('expected_employee_id', ''))
+                except (TypeError, ValueError):
+                    return JsonResponse({'success': False, 'message': 'Refresh this page before deactivating the asset.'}, status=400)
+            else:
+                expected_employee_id = None
+            try:
+                deactivate_asset(asset.pk, request.user, expected_employee_id=expected_employee_id)
+            except ValidationError as exc:
+                return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
         return redirect('asset_assign')
 
 # Asset Assignment View
@@ -205,7 +224,7 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, ListVie
         return self.request.user.is_staff
 
     def get_queryset(self):
-        return Employee.objects.filter(is_active=True)
+        return Employee.objects.filter(is_active=True).order_by('employee_id')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -223,11 +242,12 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, ListVie
         # Create matrix
         employee_rows = []
         for employee in context['employees']:
-            row = [employee]
-            for asset_type in asset_types:
-                has = employee.employee_id in assignment_lookup and asset_type.id in assignment_lookup.get(employee.employee_id, set())
-                row.append(has)
-            employee_rows.append(row)
+            row_assets = [
+                {'asset_type': asset_type,
+                 'assigned': asset_type.id in assignment_lookup.get(employee.employee_id, set())}
+                for asset_type in asset_types
+            ]
+            employee_rows.append({'employee': employee, 'assets': row_assets})
         context['employee_rows'] = employee_rows
         return context
 
@@ -247,6 +267,10 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         employee = self.get_object()
         assigned_assets = Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type')
         context['assigned_assets'] = assigned_assets
+        context['assignment_history'] = AssignmentHistory.objects.filter(employee=employee).select_related('asset', 'actor')
+        context['available_assets'] = Asset.objects.filter(
+            is_active=True, assigned_to__isnull=True, asset_type__is_active=True
+        ).select_related('asset_type').order_by('asset_type__name', 'asset_name')
 
         # Unassigned assets by type for assignment
         asset_types = AssetType.objects.filter(is_active=True)
@@ -270,10 +294,7 @@ class EmployeeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request, employee_id):
         employee = get_object_or_404(Employee, employee_id=employee_id)
         if employee.is_active:
-            # Soft delete: set inactive and unassign assets
-            employee.is_active = False
-            employee.save()
-            Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
+            deactivate_employee(employee.pk, request.user)
         return redirect('employee_list')
 
 class EmployeeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
@@ -286,15 +307,12 @@ class EmployeeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     def test_func(self):
         return self.request.user.is_staff
 
-    def delete(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):
         employee = self.get_object()
-        # Unassign all assets
-        Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
-        # Delete employee
-        response = super().delete(request, *args, **kwargs)
-        return response
+        deactivate_employee(employee.pk, request.user, employee.exit_date or timezone.now().date())
+        messages.success(request, 'Employee deactivated; assignment history was retained.')
+        return redirect(self.success_url)
 
-@method_decorator(csrf_exempt, name='dispatch')
 class AssignAssetToEmployeeView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
         return self.request.user.is_staff
@@ -304,11 +322,12 @@ class AssignAssetToEmployeeView(LoginRequiredMixin, UserPassesTestMixin, View):
         asset_id = request.POST.get('asset_id')
         if employee_id and asset_id:
             employee = get_object_or_404(Employee, employee_id=employee_id, is_active=True)
-            asset = get_object_or_404(Asset, id=asset_id)
-            if asset.assigned_to is None:
-                asset.assigned_to = employee
-                asset.save()
-                return JsonResponse({'success': True, 'message': 'Asset assigned successfully'})
+            asset = get_object_or_404(Asset, id=asset_id, is_active=True)
+            try:
+                changed = change_asset_assignment(asset.pk, employee, request.user, expected_employee_id=None)
+            except ValidationError as exc:
+                return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409 if 'concurrently' in exc.messages[0] else 400)
+            return JsonResponse({'success': True, 'message': 'Asset assigned successfully' if changed else 'Asset is already assigned to this employee'})
         return JsonResponse({'success': False, 'message': 'Invalid request'})
 
 class UnassignAssetView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -316,14 +335,54 @@ class UnassignAssetView(LoginRequiredMixin, UserPassesTestMixin, View):
         return self.request.user.is_staff
 
     def post(self, request, asset_id):
-        asset = get_object_or_404(Asset, id=asset_id)
+        asset = get_object_or_404(Asset, id=asset_id, is_active=True)
         if asset.assigned_to:
-            asset.assigned_to = None
-            asset.save()
-            return JsonResponse({'success': True, 'message': 'Asset unassigned successfully'})
+            try:
+                expected_employee_id = int(request.POST.get('expected_employee_id', ''))
+            except (TypeError, ValueError):
+                return JsonResponse({'success': False, 'message': 'Refresh this page before returning the asset.'}, status=400)
+            try:
+                change_asset_assignment(asset.pk, None, request.user, expected_employee_id=expected_employee_id)
+            except ValidationError as exc:
+                return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
+            return JsonResponse({'success': True, 'message': 'Asset returned successfully'})
         return JsonResponse({'success': False, 'message': 'Asset is not assigned'})
 
-class UnassignedAssetsAPIView(View):
+class UnassignedAssetsAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
     def get(self, request, asset_type_id):
+        if not AssetType.objects.filter(pk=asset_type_id, is_active=True).exists():
+            return JsonResponse({'detail': 'Asset type is unavailable.'}, status=404)
         unassigned = Asset.objects.filter(asset_type_id=asset_type_id, assigned_to__isnull=True, is_active=True).values('id', 'asset_name', 'unique_identifier')
         return JsonResponse(list(unassigned), safe=False)
+
+
+class EmployeeAssetOverviewCSVView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    @staticmethod
+    def safe_cell(value):
+        value = '' if value is None else str(value)
+        if value.lstrip(' \t\r\n').startswith(('=', '+', '-', '@')):
+            return "'" + value
+        return value
+
+    def get(self, request):
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="employee-asset-overview.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['employee_id', 'employee_name', 'department', 'designation', 'asset_type', 'asset_name', 'serial_number', 'assignment_status'])
+        employees = Employee.objects.filter(is_active=True).prefetch_related('asset_set__asset_type').order_by('employee_id')
+        for employee in employees:
+            assets = [asset for asset in employee.asset_set.all() if asset.is_active]
+            rows = assets or [None]
+            for asset in rows:
+                writer.writerow([self.safe_cell(value) for value in (
+                    employee.employee_id, employee.name, employee.department, employee.designation,
+                    asset.asset_type.name if asset else '', asset.asset_name if asset else '',
+                    asset.unique_identifier if asset else '', 'Assigned' if asset else 'No active assets',
+                )])
+        return response

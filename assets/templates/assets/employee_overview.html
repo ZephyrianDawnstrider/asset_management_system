@@ -1,41 +1,33 @@
 {% extends 'assets/base.html' %}
-
-{% block title %}Employee Overview{% endblock %}
-
+{% block title %}Overview{% endblock %}
+{% block page_label %}Overview{% endblock %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-2xl p-6">
-    <h2 class="text-2xl font-bold mb-6 text-gray-800">Employee Asset Overview</h2>
-    <div class="overflow-x-auto">
-        <table class="min-w-full table-auto">
-            <thead>
-                <tr class="bg-gray-50">
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                    {% for asset_type in asset_types %}
-                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{{ asset_type.name }}</th>
-                    {% endfor %}
-                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                {% for row in employee_rows %}
-                    <tr class="border-t hover:bg-blue-50 transition duration-200">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ row.0.name }} ({{ row.0.employee_id }})</td>
-                        {% for has in row|slice:"1:" %}
-                            <td class="px-6 py-4 whitespace-nowrap text-center">
-                                {% if has %}
-                                    <span class="text-green-600 font-bold text-xl">✓</span>
-                                {% else %}
-                                    <span class="text-red-600 font-bold text-xl">×</span>
-                                {% endif %}
-                            </td>
-                        {% endfor %}
-                        <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                            <a href="{% url 'employee_detail' row.0.employee_id %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">View Details</a>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+<div class="page-heading">
+  <div><p class="eyebrow">Your inventory at a glance</p><h1>Employee overview</h1><p>See who has company equipment and open a record to manage assignments.</p></div>
+  <a class="button button-secondary" href="{% url 'employee_overview_csv' %}"><span aria-hidden="true">↓</span> Export CSV</a>
 </div>
+<section class="stat-grid" aria-label="Workspace summary">
+  <div class="stat-card"><div class="stat-label">Active employees</div><div class="stat-value">{{ employees|length }}</div><div class="stat-meta">Employee records in this workspace</div></div>
+  <div class="stat-card"><div class="stat-label">Asset categories</div><div class="stat-value">{{ asset_types|length }}</div><div class="stat-meta">Active types available for tracking</div></div>
+  <div class="stat-card"><div class="stat-label">Assignment history</div><div class="stat-value">Recorded</div><div class="stat-meta">Review each asset’s custody timeline</div></div>
+  <div class="stat-card"><div class="stat-label">Need to make a change?</div><div class="stat-value" style="font-size:17px;margin-top:13px">Manage an asset</div><div class="stat-meta"><a href="{% url 'asset_assign' %}">Add new equipment →</a></div></div>
+</section>
+<section class="card" aria-labelledby="coverage-title">
+  <div class="card-header"><div><h2 id="coverage-title">Employee coverage</h2><p>Choose an employee to review assigned items, return equipment, or assign an available asset.</p></div><a class="button button-primary button-small" href="{% url 'employee_create' %}">+ Add employee</a></div>
+  {% if asset_types %}<div class="type-strip" aria-label="Tracked asset categories">{% for asset_type in asset_types %}<span class="type-chip">{{ asset_type.name }}</span>{% endfor %}</div>{% endif %}
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Role</th><th scope="col">Asset coverage</th><th scope="col">Record</th></tr></thead>
+    <tbody>
+      {% for row in employee_rows %}
+      <tr>
+        <td><div class="person-cell"><span class="person-initial" aria-hidden="true">{{ row.employee.name|slice:":1"|upper }}</span><span><strong>{{ row.employee.name }}</strong><small>{{ row.employee.employee_id }}</small></span></div></td>
+        <td>{{ row.employee.department }}</td><td>{{ row.employee.designation }}</td>
+        <td><div class="coverage-list">{% for item in row.assets %}<span class="coverage-item"><span class="matrix-mark{% if item.assigned %} has-asset{% else %} no-asset{% endif %}" aria-label="{% if item.assigned %}Assigned{% else %}Not assigned{% endif %}">{% if item.assigned %}✓{% else %}·{% endif %}</span>{{ item.asset_type.name }}</span>{% empty %}<span class="subtle">No active asset categories</span>{% endfor %}</div></td>
+        <td><a class="button button-secondary button-small" href="{% url 'employee_detail' row.employee.employee_id %}">View record <span aria-hidden="true">→</span></a></td>
+      </tr>
+      {% empty %}<tr><td colspan="5" class="empty-state"><strong>No employee records yet</strong>Add an employee to begin tracking assignments.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <div class="matrix-legend"><span><span class="matrix-mark has-asset" aria-hidden="true">✓</span> Has an asset in this category</span><span><span class="matrix-mark no-asset" aria-hidden="true">·</span> No active assignment</span></div>
+</section>
 {% endblock %}

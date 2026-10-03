@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from assets.models import Employee, Asset
+from assets.models import Employee
+from assets.services import deactivate_employee
 
 class Command(BaseCommand):
     help = 'Deactivates employees and unassigns their assets if their exit date has passed.'
@@ -10,10 +11,7 @@ class Command(BaseCommand):
         employees_to_deactivate = Employee.objects.filter(is_active=True, exit_date__lt=today)
 
         for employee in employees_to_deactivate:
-            employee.is_active = False
-            employee.save()
-
-            Asset.objects.filter(assigned_to=employee).update(assigned_to=None)
+            deactivate_employee(employee.pk, exit_date=employee.exit_date)
 
             self.stdout.write(self.style.SUCCESS(f'Successfully deactivated employee {employee.name} ({employee.employee_id}) and unassigned their assets.'))
 

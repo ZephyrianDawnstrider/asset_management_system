@@ -1,31 +1,10 @@
 {% extends 'assets/base.html' %}
-
-{% block title %}Asset Types{% endblock %}
-
+{% block title %}Asset types{% endblock %}
+{% block page_label %}Asset types{% endblock %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-2xl p-8">
-    <div class="flex justify-between items-center mb-6">
-        <div>
-            <h3 class="text-2xl font-bold text-gray-800">Asset Types</h3>
-            <p class="mt-1 text-sm text-gray-600">Manage asset type records.</p>
-        </div>
-        <a href="{% url 'assettype_create' %}" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200 transform hover:scale-[1.01] active:scale-[0.98]">Add New</a>
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {% for asset_type in asset_types %}
-            <div class="border border-gray-200 rounded-lg p-6 shadow-sm hover:shadow-lg transition duration-200">
-                <h3 class="text-lg font-semibold text-gray-800">{{ asset_type.name }}</h3>
-                <p class="text-gray-600 mt-2">{{ asset_type.identification_type_label }}</p>
-                <p class="text-sm text-gray-500 mt-1">{{ asset_type.object_description }}</p>
-                <div class="mt-6 flex space-x-3">
-                    <a href="{% url 'assettype_update' asset_type.pk %}" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg shadow-sm px-4 py-2 transition duration-200">Edit</a>
-                    <form method="post" action="{% url 'assettype_soft_delete' asset_type.pk %}" style="display:inline;" onsubmit="return confirm('Are you sure you want to soft delete this asset type?')">
-                        {% csrf_token %}
-                        <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg px-4 py-2 transition duration-200">Delete</button>
-                    </form>
-                </div>
-            </div>
-        {% endfor %}
-    </div>
-</div>
+<div class="page-heading"><div><p class="eyebrow">Inventory configuration</p><h1>Asset types</h1><p>Define categories and the identifier label people should capture for each one.</p></div><a class="button button-primary" href="{% url 'assettype_create' %}">+ Add asset type</a></div>
+<section class="card"><div class="table-wrap"><table><thead><tr><th scope="col">Category</th><th scope="col">Identifier label</th><th scope="col">Description</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for asset_type in asset_types %}<tr><td><strong class="cell-strong">{{ asset_type.name }}</strong></td><td>{{ asset_type.identification_type_label }}</td><td>{{ asset_type.object_description }}</td><td><div class="table-actions"><a class="button button-secondary button-small" href="{% url 'assettype_update' asset_type.pk %}">Edit</a><form method="post" action="{% url 'assettype_soft_delete' asset_type.pk %}" onsubmit="return confirm('Deactivate this asset type? Existing assets and history are retained.')">{% csrf_token %}<button class="button button-danger button-small" type="submit">Deactivate</button></form></div></td></tr>
+{% empty %}<tr><td colspan="4" class="empty-state"><strong>No asset types yet</strong>Create a category before adding equipment.</td></tr>{% endfor %}
+</tbody></table></div></section>
 {% endblock %}

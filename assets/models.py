@@ -1,4 +1,6 @@
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 class Employee(models.Model):
     employee_id = models.CharField(max_length=100, unique=True)
@@ -26,7 +28,7 @@ class AssetType(models.Model):
 
 class Asset(models.Model):
     asset_type = models.ForeignKey(AssetType, on_delete=models.CASCADE)
-    unique_identifier = models.CharField(max_length=255)
+    unique_identifier = models.CharField(max_length=255, unique=True)
     asset_name = models.CharField(max_length=255)
     assigned_to = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     details = models.TextField(blank=True)
@@ -37,3 +39,23 @@ class Asset(models.Model):
 
     def __str__(self):
         return self.asset_name
+
+
+class AssignmentHistory(models.Model):
+    class Action(models.TextChoices):
+        ASSIGNED = 'assigned', 'Assigned'
+        RETURNED = 'returned', 'Returned'
+        REASSIGNED = 'reassigned', 'Reassigned'
+
+    asset = models.ForeignKey(Asset, on_delete=models.PROTECT, related_name='assignment_history')
+    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, related_name='assignment_history')
+    action = models.CharField(max_length=16, choices=Action.choices)
+    occurred_at = models.DateTimeField(null=True, blank=True, default=timezone.now)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                              on_delete=models.SET_NULL, related_name='asset_assignment_actions')
+
+    class Meta:
+        ordering = ['-occurred_at', '-pk']
+
+    def __str__(self):
+        return f'{self.asset} {self.get_action_display()} {self.employee}'

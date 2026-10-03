@@ -23,6 +23,7 @@ urlpatterns = [
 
     # Employee Overview
     path('employees/overview/', views.EmployeeAssetOverviewView.as_view(), name='employee_overview'),
+    path('employees/overview.csv/', views.EmployeeAssetOverviewCSVView.as_view(), name='employee_overview_csv'),
 
     # Employee Detail
     path('employees/<str:employee_id>/', views.EmployeeAssetDetailView.as_view(), name='employee_detail'),

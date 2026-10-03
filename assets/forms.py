@@ -25,6 +25,7 @@ class AssetAssignmentForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['asset_type'].empty_label = 'Select Asset Type'
+        self.fields['asset_type'].queryset = AssetType.objects.filter(is_active=True)
 
     def save(self, commit=True):
         instance = super().save(commit=False)

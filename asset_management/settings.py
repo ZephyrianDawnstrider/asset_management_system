@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+import os
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-l%h9*vzx4-au86n-svu!!m=&+)z10c)0su32g7)4%tr**wdxnn'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'local-development-only-change-before-deploy')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost 127.0.0.1 testserver').split()
+if not DEBUG and (not os.environ.get('DJANGO_SECRET_KEY') or SECRET_KEY == 'local-development-only-change-before-deploy'):
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false.')
 
 
 # Application definition
@@ -42,6 +46,8 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
 ]
+
+ACCOUNT_ALLOW_SIGNUPS = False
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -91,7 +97,7 @@ WSGI_APPLICATION = 'asset_management.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': Path(os.environ.get('ASSET_DB_PATH', BASE_DIR / 'data' / 'assets.sqlite3')).expanduser(),
     }
 }
 
@@ -130,7 +136,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field

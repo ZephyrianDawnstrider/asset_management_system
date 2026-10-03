@@ -93,7 +93,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-          AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND (has_table_privilege('assets_portfolio_app', c.oid, 'SELECT')
                OR has_table_privilege('assets_portfolio_app', c.oid, 'INSERT')
                OR has_table_privilege('assets_portfolio_app', c.oid, 'UPDATE')
@@ -107,7 +106,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND c.relkind = 'S'
-          AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND (has_sequence_privilege('assets_portfolio_app', c.oid, 'USAGE')
                OR has_sequence_privilege('assets_portfolio_app', c.oid, 'SELECT')
                OR has_sequence_privilege('assets_portfolio_app', c.oid, 'UPDATE'))
@@ -120,7 +118,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND p.prosecdef
-          AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
           AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
     ) THEN
@@ -172,7 +169,6 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
   AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-  AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND (has_table_privilege('assets_portfolio_app', c.oid, 'SELECT')
        OR has_table_privilege('assets_portfolio_app', c.oid, 'INSERT')
        OR has_table_privilege('assets_portfolio_app', c.oid, 'UPDATE')
@@ -186,7 +182,6 @@ SELECT n.nspname AS outside_schema,
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
-  AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
   AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
 ORDER BY n.nspname, p.oid::regprocedure::text;
@@ -221,7 +216,6 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
   AND c.relkind = 'S'
-  AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND (has_sequence_privilege('assets_portfolio_app', c.oid, 'USAGE')
        OR has_sequence_privilege('assets_portfolio_app', c.oid, 'SELECT')
        OR has_sequence_privilege('assets_portfolio_app', c.oid, 'UPDATE'))

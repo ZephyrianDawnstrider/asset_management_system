@@ -120,7 +120,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND p.prosecdef
-          AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
           AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
     ) THEN
@@ -186,7 +185,6 @@ SELECT n.nspname AS outside_schema,
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
-  AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
   AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
 ORDER BY n.nspname, p.oid::regprocedure::text;

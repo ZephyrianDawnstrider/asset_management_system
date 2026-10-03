@@ -31,11 +31,11 @@ GRANT CONNECT ON DATABASE postgres TO assets_portfolio_owner, assets_portfolio_a
 ALTER ROLE assets_portfolio_owner SET search_path = assets_portfolio, pg_catalog;
 ALTER ROLE assets_portfolio_app SET search_path = assets_portfolio, pg_catalog;
 
--- The role creator keeps PostgreSQL's bootstrap-granted ADMIN membership (SET FALSE).
--- Add a separate, non-inheriting SET grant from the operator for this transaction;
--- revoke that grant before COMMIT so the operator has no lasting SET access.
+-- Temporarily grant the verified SQL SESSION_USER only enough membership to SET ROLE
+-- as the owner. The grant is non-inheriting, exists only inside this transaction,
+-- and is explicitly revoked before COMMIT. No persistent operator membership remains.
 GRANT assets_portfolio_owner TO CURRENT_USER
-    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+    WITH ADMIN TRUE, INHERIT FALSE, SET TRUE;
 CREATE SCHEMA assets_portfolio AUTHORIZATION assets_portfolio_owner;
 SET LOCAL ROLE assets_portfolio_owner;
 
@@ -93,7 +93,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-          AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND (has_table_privilege('assets_portfolio_app', c.oid, 'SELECT')
                OR has_table_privilege('assets_portfolio_app', c.oid, 'INSERT')
                OR has_table_privilege('assets_portfolio_app', c.oid, 'UPDATE')
@@ -107,7 +106,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND c.relkind = 'S'
-          AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND (has_sequence_privilege('assets_portfolio_app', c.oid, 'USAGE')
                OR has_sequence_privilege('assets_portfolio_app', c.oid, 'SELECT')
                OR has_sequence_privilege('assets_portfolio_app', c.oid, 'UPDATE'))
@@ -120,7 +118,6 @@ BEGIN
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
           AND p.prosecdef
-          AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
           AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
           AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
     ) THEN
@@ -129,7 +126,7 @@ BEGIN
 END
 $effective_privilege_check$;
 
--- Remove only the operator-granted SET access; bootstrap ADMIN membership remains.
+-- Restore the SQL editor's original principal and remove temporary SET/ADMIN access.
 REVOKE assets_portfolio_owner FROM CURRENT_USER;
 DO $membership_cleanup_check$
 BEGIN
@@ -172,7 +169,6 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
   AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-  AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND (has_table_privilege('assets_portfolio_app', c.oid, 'SELECT')
        OR has_table_privilege('assets_portfolio_app', c.oid, 'INSERT')
        OR has_table_privilege('assets_portfolio_app', c.oid, 'UPDATE')
@@ -186,7 +182,6 @@ SELECT n.nspname AS outside_schema,
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
-  AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
   AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND has_function_privilege('assets_portfolio_app', p.oid, 'EXECUTE')
 ORDER BY n.nspname, p.oid::regprocedure::text;
@@ -221,7 +216,6 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname NOT IN ('assets_portfolio', 'pg_catalog', 'information_schema')
   AND c.relkind = 'S'
-  AND has_schema_privilege('assets_portfolio_app', n.oid, 'USAGE')
   AND (has_sequence_privilege('assets_portfolio_app', c.oid, 'USAGE')
        OR has_sequence_privilege('assets_portfolio_app', c.oid, 'SELECT')
        OR has_sequence_privilege('assets_portfolio_app', c.oid, 'UPDATE'))

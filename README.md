@@ -55,3 +55,9 @@ At narrow screen widths, the current operator and sign-out action remain in the 
 An employee exit date is their final active day. Automatic offboarding runs after that date, when `exit_date` is before today. The explicit Deactivate action in the employee directory remains immediate and returns their assigned assets through the recorded workflow.
 
 This remains a local v1 demonstration with a v2 UI refinement: server-side pagination and clearer custody history do not make SQLite suitable for concurrent production writes or add hosting, backups, monitoring, operational recovery, employee self-service, or department-scoped access.
+
+## Render packaging readiness — 2026-10-03
+
+An additive, free-only Docker/Blueprint packaging draft is available in [`docs/render-free-preview.md`](docs/render-free-preview.md). It is not a deployed service and does not provision storage. `render.yaml` is an image-backed manual template with a placeholder image URL, auto-deploy disabled, and externally supplied PostgreSQL configuration; no database resource is declared. Build runs static collection only, and ordinary startup does not migrate or seed data. The tracked historical database is excluded from the Docker context and image, but remains in the repository history; do not use a Git-based external build route.
+
+The approved target is the existing private Supabase `assets_portfolio` schema; the authorized operator still needs to confirm credentials and isolation. No new database is provisioned by this work. Render Free PostgreSQL expires after 30 days, is limited to 1 GB, and has no backups, so it is not a durable fallback. Restart persistence, backup/recovery, image review, and hosted acceptance remain pending. Do not connect or deploy this configuration with real data until those gates are resolved.

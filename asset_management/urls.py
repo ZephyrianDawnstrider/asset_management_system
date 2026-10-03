@@ -17,8 +17,10 @@ Including another URLconf
 from assets.admin import staff_admin_site
 from django.urls import path, include
 from assets.views import HomeView
+from assets.health import health
 
 urlpatterns = [
+    path('health/', health, name='health'),
     path('admin/', staff_admin_site.urls),
     path('accounts/', include('allauth.urls')),
     path('', HomeView.as_view(), name='home'),

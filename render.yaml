@@ -1,0 +1,28 @@
+# MANUAL TEMPLATE ONLY: keep this image URL placeholder until publication is approved.
+# Do not switch this service back to a Git-backed build.
+services:
+  - type: web
+    runtime: image
+    name: fieldnote-assets-preview
+    plan: free
+    image:
+      url: REPLACE_ONLY_AFTER_APPROVED_IMMUTABLE_IMAGE_PUBLICATION
+    autoDeployTrigger: "off"
+    healthCheckPath: /health/
+    envVars:
+      - key: DJANGO_ENV
+        value: production
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_DB_ROLE
+        value: runtime
+      - key: ASSET_DB_SCHEMA
+        value: assets_portfolio
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false

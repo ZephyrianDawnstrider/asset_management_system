@@ -1,0 +1,198 @@
+name: Build reviewed Render image
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_image:
+        description: Push the scanned image to GHCR (the package visibility remains unchanged)
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: render-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-review:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the approved public source repository
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${SOURCE_REPOSITORY}" \
+            > "$RUNNER_TEMP/source-repository.json"
+          python3 - "$RUNNER_TEMP/source-repository.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as source:
+              repository = json.load(source)
+          if repository.get("visibility") != "public":
+              raise SystemExit("Source repository is not public; refusing this approved build route.")
+          print("Public source repository confirmed before checkout.")
+          PY
+
+      - name: Check out the selected main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify checked out source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the allowlisted image without publishing
+        id: build
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${SOURCE_REPOSITORY,,}:revision-${SOURCE_REVISION}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${SOURCE_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${SOURCE_REVISION}" \
+            --tag "$image" \
+            .
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect the unstarted image filesystem
+        shell: bash
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          container_id="$(docker create "$IMAGE")"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          docker export "$container_id" | python3 -c '
+          import pathlib, sys, tarfile
+
+          forbidden_suffixes = {".sqlite", ".sqlite3", ".db", ".dump", ".sql", ".bak", ".backup", ".pem", ".key", ".p12", ".pfx"}
+          forbidden_names = {".git", "work", "data", "logs", "__pycache__", "tests.py"}
+          forbidden_markers = ("secret", "credential", "password", "seed_demo")
+          seen = set()
+          problems = []
+          with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as image:
+              for member in image:
+                  path = pathlib.PurePosixPath(member.name.lstrip("./"))
+                  parts = path.parts
+                  if not parts or parts[0] != "app":
+                      continue
+                  relative = pathlib.PurePosixPath(*parts[1:])
+                  if member.isfile():
+                      seen.add(relative.as_posix())
+                  lower_parts = [part.lower() for part in relative.parts]
+                  if (relative.name.lower() in forbidden_names
+                      or relative.name.lower().startswith("test_")
+                      or relative.name.lower().endswith("_test.py")
+                      or any(part in forbidden_names for part in lower_parts)
+                      or relative.suffix.lower() in forbidden_suffixes
+                      or any(marker in relative.name.lower() for marker in forbidden_markers)
+                      or relative.name.lower().startswith(".env")):
+                      problems.append(relative.as_posix())
+          required = {"manage.py", "asset_management/settings.py", "assets/models.py"}
+          if not required <= seen:
+              problems.append("missing required application files")
+          if not any(path.startswith("staticfiles/") for path in seen):
+              problems.append("missing collected static files")
+          if not any(path.startswith("assets/migrations/") and path.endswith(".py") for path in seen):
+              problems.append("missing migrations")
+          if problems:
+              print("Image filesystem review failed:", "; ".join(problems), file=sys.stderr)
+              raise SystemExit(1)
+          print(f"Image filesystem review passed for {len(seen)} /app paths; no database, dump, backup, env, credential, Git, test, or seed paths found.")
+          '
+
+      - name: Verify production startup fails closed without configuration
+        shell: bash
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          set +e
+          timeout 20s docker run --rm --network none "$IMAGE" > "$RUNNER_TEMP/missing-config.log" 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -eq 0 || "$status" -eq 124 ]]; then
+            echo "Image did not fail promptly without production secrets; refusing publication." >&2
+            exit 1
+          fi
+          if ! grep -q 'DJANGO_SECRET_KEY' "$RUNNER_TEMP/missing-config.log"; then
+            echo "Image failed without configuration but not at the expected secret-key gate." >&2
+            exit 1
+          fi
+          echo 'Fail-closed startup check passed without a secret or network.'
+
+      - name: Verify schema-unready health response offline
+        shell: bash
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          name="asset-health-smoke-${GITHUB_RUN_ID}"
+          docker run --detach --name "$name" --network none \
+            --env DJANGO_ENV=build \
+            --env PORT=10000 \
+            "$IMAGE" >/dev/null
+          trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if docker exec "$name" python -c '
+          import json, urllib.error, urllib.request
+          try:
+              response = urllib.request.urlopen("http://127.0.0.1:10000/health/", timeout=2)
+              status, body = response.status, response.read()
+          except urllib.error.HTTPError as error:
+              status, body = error.code, error.read()
+          if status != 503 or json.loads(body) != {"status": "unavailable"}:
+              raise SystemExit("Expected generic schema-unready health response.")
+          print("Offline health smoke returned the expected generic 503.")
+          ' 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Offline health smoke did not return the expected schema-unready response." >&2
+          exit 1
+
+      - name: Publish only when the explicit workflow input is enabled
+        if: inputs.publish_image
+        shell: bash
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE"
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          if [[ -z "$digest" || "$digest" != *@sha256:* ]]; then
+            echo "Registry did not return an immutable image digest." >&2
+            exit 1
+          fi
+          {
+            echo '### Reviewed Render image'
+            echo
+            printf -- '- Source revision: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Image reference: `%s`\n' "$digest"
+            echo '- Runtime filesystem scan: passed before push'
+            echo '- Package visibility: unchanged; owner must make it public in GHCR settings before Render use if it was created private.'
+          } >> "$GITHUB_STEP_SUMMARY"

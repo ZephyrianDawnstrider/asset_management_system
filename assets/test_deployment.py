@@ -62,6 +62,41 @@ class ProductionSettingsTests(SimpleTestCase):
         self.assertEqual(settings["db_options"]["sslmode"], "require")
         self.assertEqual(settings["db_options"]["options"], "-c search_path=assets_portfolio,pg_catalog")
 
+    def test_production_preserves_explicit_tls_modes_and_system_roots(self):
+        base_url = GOOD_ENV["DATABASE_URL"]
+        cases = [
+            ("?sslmode=verify-full", "verify-full", None),
+            ("?sslmode=verify-ca", "verify-ca", None),
+            ("?sslrootcert=system", "verify-full", "system"),
+            ("?sslmode=verify-full&sslrootcert=system", "verify-full", "system"),
+        ]
+        for query, expected_mode, expected_root in cases:
+            with self.subTest(query=query):
+                result = self.load_settings({"DATABASE_URL": base_url + query})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                options = json.loads(result.stdout)["db_options"]
+                self.assertEqual(options["sslmode"], expected_mode)
+                if expected_root is None:
+                    self.assertNotIn("sslrootcert", options)
+                else:
+                    self.assertEqual(options["sslrootcert"], expected_root)
+
+    def test_production_rejects_downgraded_or_ambiguous_tls_urls(self):
+        base_url = GOOD_ENV["DATABASE_URL"]
+        failures = [
+            ("?sslmode=disable", "sslmode must be require, verify-ca, or verify-full"),
+            ("?sslmode=allow", "sslmode must be require, verify-ca, or verify-full"),
+            ("?sslmode=prefer", "sslmode must be require, verify-ca, or verify-full"),
+            ("?sslrootcert=system&sslmode=require", "sslrootcert=system requires sslmode=verify-full"),
+            ("?sslrootcert=system&sslmode=verify-ca", "sslrootcert=system requires sslmode=verify-full"),
+            ("?sslmode=verify-full&sslmode=require", "may specify sslmode and sslrootcert only once"),
+        ]
+        for query, message in failures:
+            with self.subTest(query=query):
+                result = self.load_settings({"DATABASE_URL": base_url + query})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
     def test_production_requires_database_secret_hosts_and_csrf(self):
         failures = [
             ({"DATABASE_URL": ""}, "DATABASE_URL is required"),

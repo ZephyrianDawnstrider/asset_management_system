@@ -1,7 +1,7 @@
 """Settings for local development and explicitly configured production hosting."""
 
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 import os
 import re
 
@@ -119,6 +119,26 @@ if PRODUCTION:
         database_port = parsed_database_url.port or 5432
     except ValueError:
         raise ImproperlyConfigured("DATABASE_URL must be a valid Supabase session-pooler PostgreSQL URL.") from None
+    ssl_params = {}
+    for key, value in parse_qsl(parsed_database_url.query, keep_blank_values=True):
+        normalized_key = key.lower()
+        if normalized_key in {"sslmode", "sslrootcert"}:
+            if normalized_key in ssl_params:
+                raise ImproperlyConfigured("DATABASE_URL may specify sslmode and sslrootcert only once each.")
+            ssl_params[normalized_key] = value
+    explicit_sslmode = ssl_params.get("sslmode")
+    if explicit_sslmode is not None:
+        explicit_sslmode = explicit_sslmode.lower()
+        if explicit_sslmode not in {"require", "verify-ca", "verify-full"}:
+            raise ImproperlyConfigured(
+                "DATABASE_URL sslmode must be require, verify-ca, or verify-full in production."
+            )
+    sslrootcert = ssl_params.get("sslrootcert")
+    if sslrootcert is not None and not sslrootcert:
+        raise ImproperlyConfigured("DATABASE_URL sslrootcert must not be empty when provided.")
+    system_roots = sslrootcert is not None and sslrootcert.lower() == "system"
+    if system_roots and explicit_sslmode in {"require", "verify-ca"}:
+        raise ImproperlyConfigured("DATABASE_URL sslrootcert=system requires sslmode=verify-full.")
     required_role = ASSET_DB_RUNTIME_ROLE if DJANGO_DB_ROLE == "runtime" else ASSET_DB_MIGRATION_ROLE
     required_user = f"{required_role}.{SUPABASE_PROJECT_REF}"
     if (parsed_database_url.scheme.lower() not in {"postgres", "postgresql"}
@@ -136,10 +156,15 @@ if PRODUCTION:
         raise ImproperlyConfigured("DATABASE_URL could not be parsed as a PostgreSQL connection.") from None
     if DATABASES["default"].get("ENGINE") != "django.db.backends.postgresql":
         raise ImproperlyConfigured("DATABASE_URL must configure the PostgreSQL backend.")
+    # libpq18 supports sslrootcert=system and requires verify-full with system roots.
+    # Without an explicit CA setting, require preserves the preview's TLS-encrypted
+    # connection behavior; callers may request the stronger verify-ca/verify-full modes.
     DATABASES["default"].setdefault("OPTIONS", {}).update({
-        "sslmode": "require",
+        "sslmode": explicit_sslmode or ("verify-full" if system_roots else "require"),
         "options": f"-c search_path={ASSET_DB_SCHEMA},pg_catalog",
     })
+    if sslrootcert is not None:
+        DATABASES["default"]["OPTIONS"]["sslrootcert"] = "system" if system_roots else sslrootcert
     # Database authentication is intentionally split: the WSGI process may only use
     # the restricted app login; explicit `manage.py migrate` uses the schema owner.
 else:

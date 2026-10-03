@@ -180,6 +180,45 @@ jobs:
           echo "Offline health smoke did not return the expected schema-unready response." >&2
           exit 1
 
+      - name: Verify bundled libpq and system-trust PostgreSQL TLS
+        shell: bash
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+          TLS_HOST: aws-1-ap-south-1.pooler.supabase.com
+        run: |
+          set -euo pipefail
+          timeout 25s docker run --rm --network bridge \
+            --env TLS_HOST="$TLS_HOST" \
+            "$IMAGE" python -c '
+          import os, socket, ssl, struct
+          from psycopg import pq
+
+          version = pq.version()
+          implementation = pq.__impl__
+          if version < 180000:
+              raise SystemExit(f"Expected libpq 18+ for sslrootcert=system; loaded {version}.")
+          if implementation != "binary":
+              raise SystemExit(f"Expected bundled psycopg binary implementation; loaded {implementation}.")
+
+          context = ssl.create_default_context()
+          ca_count = context.cert_store_stats().get("x509_ca", 0)
+          if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname or ca_count < 1:
+              raise SystemExit("Python SSL system trust roots or hostname verification are unavailable.")
+
+          host = os.environ["TLS_HOST"]
+          with socket.create_connection((host, 5432), timeout=12) as raw:
+              raw.settimeout(12)
+              raw.sendall(struct.pack("!II", 8, 80877103))
+              if raw.recv(1) != b"S":
+                  raise SystemExit("PostgreSQL endpoint did not accept an SSLRequest.")
+              with context.wrap_socket(raw, server_hostname=host) as tls:
+                  if tls.version() is None or tls.cipher() is None:
+                      raise SystemExit("TLS handshake did not negotiate a cipher.")
+                  print(f"Bundled psycopg implementation={implementation}; libpq={version}.")
+                  print(f"Python SSL system CA roots={ca_count}; hostname-verified TLS={tls.version()}.")
+                  print("Credential-free PostgreSQL SSLRequest handshake only; no libpq/app role login was attempted.")
+          '
+
       - name: Publish only when the explicit workflow input is enabled
         if: inputs.publish_image
         shell: bash

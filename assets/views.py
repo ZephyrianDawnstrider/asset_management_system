@@ -6,13 +6,23 @@ from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
+from django.db.models import Q
 from .models import Employee, AssetType, Asset, AssignmentHistory
 from .forms import AssetAssignmentForm, AssetAssignmentToEmployeeForm
 from django.views import View
 from .services import change_asset_assignment, deactivate_asset, deactivate_employee
+
+
+class GracefulPaginationMixin:
+    """Keep malformed or out-of-range page parameters on a valid page."""
+    def paginate_queryset(self, queryset, page_size):
+        paginator = self.get_paginator(queryset, page_size, allow_empty_first_page=self.get_allow_empty())
+        page = paginator.get_page(self.request.GET.get(self.page_kwarg))
+        return paginator, page, page.object_list, page.has_other_pages()
 
 
 class HomeView(TemplateView):
@@ -30,16 +40,37 @@ class HomeView(TemplateView):
             return super().get(request, *args, **kwargs)
 
 # Employee CRUD Views
-class EmployeeListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
+class EmployeeListView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationMixin, ListView):
     model = Employee
     template_name = 'assets/employee_list.html'
     context_object_name = 'employees'
+    paginate_by = 20
 
     def test_func(self):
         return self.request.user.is_staff
 
     def get_queryset(self):
-        return Employee.objects.filter(is_active=True)
+        qs = Employee.objects.filter(is_active=True)
+        self.filter_q = self.request.GET.get('q', '').strip()[:100]
+        self.filter_department = self.request.GET.get('department', '').strip()[:255]
+        if self.filter_q:
+            qs = qs.filter(Q(employee_id__icontains=self.filter_q) | Q(name__icontains=self.filter_q) |
+                           Q(department__icontains=self.filter_q) | Q(designation__icontains=self.filter_q))
+        if self.filter_department:
+            qs = qs.filter(department__iexact=self.filter_department)
+        return qs.order_by('name', 'employee_id', 'pk')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        if context.get('page_obj') is not None:
+            context['employees'] = context['page_obj']
+        context.update(filter_q=self.filter_q, filter_department=self.filter_department,
+                       departments=list(Employee.objects.filter(is_active=True).values_list('department', flat=True).distinct().order_by('department')),
+                       result_count=self.get_queryset().count())
+        context['page_query'] = self.request.GET.copy()
+        context['page_query'].pop('page', None)
+        context['page_query'] = context['page_query'].urlencode()
+        return context
 
 class EmployeeCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Employee
@@ -93,7 +124,7 @@ class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         employee = form.save(commit=False)
         editable_fields = ['employee_id', 'name', 'department', 'designation', 'start_date', 'exit_date']
         if employee.exit_date:
-            if employee.exit_date <= timezone.now().date():
+            if employee.exit_date < timezone.now().date():
                 with transaction.atomic():
                     employee.save(update_fields=editable_fields)
                     deactivate_employee(employee.pk, self.request.user, employee.exit_date)
@@ -145,16 +176,49 @@ class AssetTypeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
             asset_type.save()
         return redirect('assettype_list')
 
-class AssetListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
+class AssetListView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationMixin, ListView):
     model = Asset
     template_name = 'assets/asset_list.html'
     context_object_name = 'assets'
+    paginate_by = 20
 
     def test_func(self):
         return self.request.user.is_staff
 
     def get_queryset(self):
-        return Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
+        qs = Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
+        self.filter_q = self.request.GET.get('q', '').strip()[:100]
+        self.filter_asset_type = self.request.GET.get('asset_type', '').strip()[:20]
+        self.filter_status = self.request.GET.get('status', '').strip().lower()
+        if self.filter_q:
+            qs = qs.filter(Q(asset_name__icontains=self.filter_q) | Q(unique_identifier__icontains=self.filter_q) |
+                           Q(details__icontains=self.filter_q) | Q(assigned_to__name__icontains=self.filter_q) |
+                           Q(assigned_to__employee_id__icontains=self.filter_q))
+        try:
+            type_id = int(self.filter_asset_type)
+            if 0 < type_id <= 9223372036854775807 and AssetType.objects.filter(pk=type_id, is_active=True).exists():
+                qs = qs.filter(asset_type_id=type_id)
+            else:
+                self.filter_asset_type = ''
+        except (TypeError, ValueError):
+            self.filter_asset_type = ''
+        if self.filter_status in ('assigned', 'available'):
+            qs = qs.filter(assigned_to__isnull=(self.filter_status == 'available'))
+        else:
+            self.filter_status = ''
+        return qs.order_by('asset_name', 'unique_identifier', 'pk')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        if context.get('page_obj') is not None:
+            context['assets'] = context['page_obj']
+        context.update(filter_q=self.filter_q, filter_asset_type=self.filter_asset_type,
+                       filter_status=self.filter_status, asset_types=AssetType.objects.filter(is_active=True).order_by('name', 'pk'),
+                       result_count=self.get_queryset().count())
+        query = self.request.GET.copy()
+        query.pop('page', None)
+        context['page_query'] = query.urlencode()
+        return context
 
 class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Asset
@@ -215,36 +279,61 @@ class AssetAssignmentView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         return context
 
 # Employee Overview (Tickmark Matrix)
-class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, ListView):
+class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationMixin, ListView):
     model = Employee
     template_name = 'assets/employee_overview.html'
     context_object_name = 'employees'
+    paginate_by = 20
 
     def test_func(self):
         return self.request.user.is_staff
 
     def get_queryset(self):
-        return Employee.objects.filter(is_active=True).order_by('employee_id')
+        qs = Employee.objects.filter(is_active=True)
+        self.filter_q = self.request.GET.get('q', '').strip()[:100]
+        self.filter_department = self.request.GET.get('department', '').strip()[:255]
+        if self.filter_q:
+            qs = qs.filter(Q(employee_id__icontains=self.filter_q) | Q(name__icontains=self.filter_q) |
+                           Q(department__icontains=self.filter_q) | Q(designation__icontains=self.filter_q))
+        if self.filter_department:
+            qs = qs.filter(department__iexact=self.filter_department)
+        return qs.order_by('employee_id', 'pk')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        asset_types = AssetType.objects.filter(is_active=True)
+        asset_types = AssetType.objects.filter(is_active=True).order_by('name', 'pk')
+        if context.get('page_obj') is not None:
+            context['employees'] = context['page_obj']
         # Fetch all assignments
-        assignments = Asset.objects.filter(assigned_to__isnull=False, is_active=True).select_related('assigned_to', 'asset_type')
+        page_employee_ids = [employee.pk for employee in context['employees']]
+        assignments = Asset.objects.filter(assigned_to_id__in=page_employee_ids, assigned_to__isnull=False,
+                                           is_active=True).select_related('asset_type')
         # Create lookup: employee_id -> set of asset_type_ids
         assignment_lookup = {}
         for asset in assignments:
-            emp_id = asset.assigned_to.employee_id
+            emp_id = asset.assigned_to_id
             if emp_id not in assignment_lookup:
                 assignment_lookup[emp_id] = set()
             assignment_lookup[emp_id].add(asset.asset_type.id)
         context['asset_types'] = asset_types
+        context['total_employees'] = Employee.objects.filter(is_active=True).count()
+        context['total_assets'] = Asset.objects.filter(is_active=True).count()
+        context['assigned_assets'] = Asset.objects.filter(is_active=True, assigned_to__isnull=False).count()
+        context['unassigned_assets_count'] = context['total_assets'] - context['assigned_assets']
+        context['asset_type_count'] = asset_types.count()
+        context['filter_q'] = self.filter_q
+        context['filter_department'] = self.filter_department
+        context['departments'] = list(Employee.objects.filter(is_active=True).values_list('department', flat=True).distinct().order_by('department'))
+        context['result_count'] = self.get_queryset().count()
+        query = self.request.GET.copy()
+        query.pop('page', None)
+        context['page_query'] = query.urlencode()
         # Create matrix
         employee_rows = []
         for employee in context['employees']:
             row_assets = [
                 {'asset_type': asset_type,
-                 'assigned': asset_type.id in assignment_lookup.get(employee.employee_id, set())}
+                 'assigned': asset_type.id in assignment_lookup.get(employee.pk, set())}
                 for asset_type in asset_types
             ]
             employee_rows.append({'employee': employee, 'assets': row_assets})
@@ -267,7 +356,14 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         employee = self.get_object()
         assigned_assets = Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type')
         context['assigned_assets'] = assigned_assets
-        context['assignment_history'] = AssignmentHistory.objects.filter(employee=employee).select_related('asset', 'actor')
+        history = AssignmentHistory.objects.filter(employee=employee).select_related('asset', 'actor').order_by('-occurred_at', '-pk')
+        history_page = Paginator(history, 20).get_page(self.request.GET.get('history_page'))
+        context['assignment_history'] = history_page
+        context['history_page'] = history_page
+        context['history_page_size'] = 20
+        query = self.request.GET.copy()
+        query.pop('history_page', None)
+        context['history_page_query'] = query.urlencode()
         context['available_assets'] = Asset.objects.filter(
             is_active=True, assigned_to__isnull=True, asset_type__is_active=True
         ).select_related('asset_type').order_by('asset_type__name', 'asset_name')
@@ -285,6 +381,28 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         assigned_types = set(assigned_assets.values_list('asset_type__id', flat=True))
         context['assigned_types'] = assigned_types
 
+        return context
+
+class AssetHistoryView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
+    model = Asset
+    template_name = 'assets/asset_history.html'
+    context_object_name = 'asset'
+
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def get_queryset(self):
+        # Include retired assets: durable history remains inspectable after retirement.
+        return Asset.objects.select_related('asset_type', 'assigned_to')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        history = AssignmentHistory.objects.filter(asset=self.object).select_related('employee', 'actor').order_by('-occurred_at', '-pk')
+        page = Paginator(history, 20).get_page(self.request.GET.get('history_page'))
+        context.update(assignment_history=page, history_page=page, history_page_size=20)
+        query = self.request.GET.copy()
+        query.pop('history_page', None)
+        context['history_page_query'] = query.urlencode()
         return context
 
 class EmployeeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):

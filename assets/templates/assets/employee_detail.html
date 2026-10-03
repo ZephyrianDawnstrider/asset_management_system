@@ -6,8 +6,8 @@
 <div class="page-heading"><div><p class="eyebrow">Employee record</p><h1>{{ employee.name }}</h1><p>{{ employee.department }} · {{ employee.designation }}</p></div><div class="heading-actions"><a class="button button-secondary" href="{% url 'employee_update' employee.pk %}">Edit employee</a><a class="button button-secondary" href="{% url 'employee_overview' %}">Back to overview</a></div></div>
 <div class="detail-grid">
   <div class="detail-main">
-    <section class="card" aria-labelledby="equipment-title">
-      <div class="profile-panel"><div class="profile-avatar" aria-hidden="true">{{ employee.name|slice:":1"|upper }}</div><div><h2>{{ employee.name }}</h2><p>{{ employee.employee_id }} <span aria-hidden="true">·</span> {{ employee.department }}</p></div></div>
+    <section class="card" aria-labelledby="profile-title">
+      <div class="profile-panel"><div class="profile-avatar" aria-hidden="true">{{ employee.name|slice:":1"|upper }}</div><div><h2 id="profile-title">{{ employee.name }}</h2><p>{{ employee.employee_id }} <span aria-hidden="true">·</span> {{ employee.department }}</p></div></div>
       <div class="profile-facts"><div><span>Designation</span><strong>{{ employee.designation }}</strong></div><div><span>Start date</span><strong>{{ employee.start_date|date:"M j, Y" }}</strong></div><div><span>Record status</span><strong>{% if employee.is_active %}Active{% else %}Inactive{% endif %}</strong></div></div>
     </section>
     <section class="card section-gap" aria-labelledby="equipment-title">
@@ -26,10 +26,10 @@
       </form>{% if not available_assets %}<p class="muted-note">No available assets. <a href="{% url 'asset_assign' %}">Add an asset</a> to the register first.</p>{% endif %}</div>
     </section>
   </div>
-  <aside class="card" aria-labelledby="history-title"><div class="card-header"><div><h2 id="history-title">Assignment history</h2><p>Recorded custody changes for this employee.</p></div></div><div class="history-list">
+  <aside class="card" aria-labelledby="history-title"><div class="card-header"><div><h2 id="history-title">Assignment history</h2><p>Recorded custody changes for this employee.</p></div>{% if history_page %}<span class="pill pill-gray">{{ history_page.paginator.count }} events</span>{% endif %}</div><div class="history-list">
     {% for event in assignment_history %}<article class="history-item"><span class="history-icon" aria-hidden="true">{% if event.action == 'returned' %}↶{% else %}↗{% endif %}</span><div><p><strong>{{ event.get_action_display }}</strong> · {{ event.asset.asset_name }}<span class="subtle">{{ event.asset.unique_identifier }}</span></p><small>{% if event.occurred_at %}{{ event.occurred_at|date:"M j, Y · H:i" }}{% else %}<span class="history-old-time">Historical assignment; original date not recorded.</span>{% endif %}{% if event.actor %} · by {{ event.actor.get_username }}{% endif %}</small></div></article>
     {% empty %}<div class="empty-state"><strong>No history recorded</strong>Future assignment and return actions will appear here.</div>{% endfor %}
-  </div></aside>
+  </div>{% if history_page.has_other_pages %}<nav class="pagination history-pagination" aria-label="Assignment history pages"><span class="pagination-status">Page {{ history_page.number }} of {{ history_page.paginator.num_pages }}</span><div class="pagination-actions">{% if history_page.has_previous %}<a class="button button-secondary" rel="prev" href="?{% if history_page_query %}{{ history_page_query }}&{% endif %}history_page={{ history_page.previous_page_number }}#history-title">Previous</a>{% else %}<span class="button button-secondary is-disabled" aria-disabled="true">Previous</span>{% endif %}{% if history_page.has_next %}<a class="button button-secondary" rel="next" href="?{% if history_page_query %}{{ history_page_query }}&{% endif %}history_page={{ history_page.next_page_number }}#history-title">Next</a>{% else %}<span class="button button-secondary is-disabled" aria-disabled="true">Next</span>{% endif %}</div></nav>{% endif %}</aside>
 </div>
 {% endblock %}
 {% block scripts %}<script src="{% static 'assets/js/assignments.js' %}" defer></script>{% endblock %}

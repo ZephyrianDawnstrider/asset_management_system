@@ -4,7 +4,7 @@ from assets.models import Employee
 from assets.services import deactivate_employee
 
 class Command(BaseCommand):
-    help = 'Deactivates employees and unassigns their assets if their exit date has passed.'
+    help = 'Deactivates employees and returns their assets after their final active day.'
 
     def handle(self, *args, **options):
         today = timezone.now().date()

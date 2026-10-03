@@ -4,30 +4,39 @@
 {% block content %}
 <div class="page-heading">
   <div><p class="eyebrow">Your inventory at a glance</p><h1>Employee overview</h1><p>See who has company equipment and open a record to manage assignments.</p></div>
-  <a class="button button-secondary" href="{% url 'employee_overview_csv' %}"><span aria-hidden="true">↓</span> Export CSV</a>
+  <a class="button button-secondary" href="{% url 'employee_overview_csv' %}"><span aria-hidden="true">↓</span> Export all active employees</a>
 </div>
 <section class="stat-grid" aria-label="Workspace summary">
-  <div class="stat-card"><div class="stat-label">Active employees</div><div class="stat-value">{{ employees|length }}</div><div class="stat-meta">Employee records in this workspace</div></div>
-  <div class="stat-card"><div class="stat-label">Asset categories</div><div class="stat-value">{{ asset_types|length }}</div><div class="stat-meta">Active types available for tracking</div></div>
-  <div class="stat-card"><div class="stat-label">Assignment history</div><div class="stat-value">Recorded</div><div class="stat-meta">Review each asset’s custody timeline</div></div>
-  <div class="stat-card"><div class="stat-label">Need to make a change?</div><div class="stat-value" style="font-size:17px;margin-top:13px">Manage an asset</div><div class="stat-meta"><a href="{% url 'asset_assign' %}">Add new equipment →</a></div></div>
+  <div class="stat-card"><div class="stat-label">Active employees</div><div class="stat-value">{{ total_employees }}</div><div class="stat-meta">All active employee records</div></div>
+  <div class="stat-card"><div class="stat-label">Active assets</div><div class="stat-value">{{ total_assets }}</div><div class="stat-meta">Across {{ asset_type_count }} asset categories</div></div>
+  <div class="stat-card"><div class="stat-label">Currently assigned</div><div class="stat-value">{{ assigned_assets }}</div><div class="stat-meta">Active assets with a holder</div></div>
+  <div class="stat-card"><div class="stat-label">Unassigned</div><div class="stat-value">{{ unassigned_assets_count }}</div><div class="stat-meta">Active assets without a current holder</div></div>
 </section>
 <section class="card" aria-labelledby="coverage-title">
-  <div class="card-header"><div><h2 id="coverage-title">Employee coverage</h2><p>Choose an employee to review assigned items, return equipment, or assign an available asset.</p></div><a class="button button-primary button-small" href="{% url 'employee_create' %}">+ Add employee</a></div>
+  <div class="card-header"><div><h2 id="coverage-title">Employee coverage</h2><p>Choose an employee to review equipment, return an item, or assign available assets.</p></div><a class="button button-primary button-small" href="{% url 'employee_create' %}">+ Add employee</a></div>
+  <form class="filter-bar" method="get" action="{% url 'employee_overview' %}">
+    {% for name, value in request.GET.items %}{% if name != 'q' and name != 'department' and name != 'page' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+    <div class="filter-fields"><div class="field filter-search"><label for="overview-q">Search employees</label><input id="overview-q" name="q" type="search" value="{{ filter_q }}" placeholder="Name, ID, or department"></div>
+      <div class="field filter-department"><label for="overview-department">Department</label><select id="overview-department" name="department"><option value="">All departments</option>{% for department in departments %}<option value="{{ department }}"{% if filter_department == department %} selected{% endif %}>{{ department }}</option>{% endfor %}</select></div></div>
+    <div class="filter-actions"><button class="button button-primary" type="submit">Apply filters</button>{% if filter_q or filter_department %}<a class="button button-secondary" href="{% url 'employee_overview' %}">Clear</a>{% endif %}</div>
+  </form>
+  <div class="result-bar" aria-live="polite"><span>{% if result_count %}Showing {{ employee_rows|length }} of {{ result_count }} matching employee{{ result_count|pluralize }}{% elif filter_q or filter_department %}No employees match these filters{% else %}No active employees{% endif %}</span><span>{{ asset_type_count }} active categories</span></div>
   {% if asset_types %}<div class="type-strip" aria-label="Tracked asset categories">{% for asset_type in asset_types %}<span class="type-chip">{{ asset_type.name }}</span>{% endfor %}</div>{% endif %}
   <div class="table-wrap"><table>
     <thead><tr><th scope="col">Employee</th><th scope="col">Department</th><th scope="col">Role</th><th scope="col">Asset coverage</th><th scope="col">Record</th></tr></thead>
     <tbody>
-      {% for row in employee_rows %}
-      <tr>
+      {% for row in employee_rows %}<tr>
         <td><div class="person-cell"><span class="person-initial" aria-hidden="true">{{ row.employee.name|slice:":1"|upper }}</span><span><strong>{{ row.employee.name }}</strong><small>{{ row.employee.employee_id }}</small></span></div></td>
         <td>{{ row.employee.department }}</td><td>{{ row.employee.designation }}</td>
         <td><div class="coverage-list">{% for item in row.assets %}<span class="coverage-item"><span class="matrix-mark{% if item.assigned %} has-asset{% else %} no-asset{% endif %}" aria-label="{% if item.assigned %}Assigned{% else %}Not assigned{% endif %}">{% if item.assigned %}✓{% else %}·{% endif %}</span>{{ item.asset_type.name }}</span>{% empty %}<span class="subtle">No active asset categories</span>{% endfor %}</div></td>
         <td><a class="button button-secondary button-small" href="{% url 'employee_detail' row.employee.employee_id %}">View record <span aria-hidden="true">→</span></a></td>
-      </tr>
-      {% empty %}<tr><td colspan="5" class="empty-state"><strong>No employee records yet</strong>Add an employee to begin tracking assignments.</td></tr>{% endfor %}
+      </tr>{% empty %}<tr><td colspan="5" class="empty-state"><strong>{% if filter_q or filter_department %}No employees match these filters{% else %}No employee records yet{% endif %}</strong>{% if filter_q or filter_department %}Try a different search or clear your filters.{% else %}Add an employee to begin tracking assignments.{% endif %}</td></tr>{% endfor %}
     </tbody>
   </table></div>
   <div class="matrix-legend"><span><span class="matrix-mark has-asset" aria-hidden="true">✓</span> Has an asset in this category</span><span><span class="matrix-mark no-asset" aria-hidden="true">·</span> No active assignment</span></div>
+  {% if employees.has_other_pages %}<nav class="pagination" aria-label="Employee overview pages"><span class="pagination-status">Page {{ employees.number }} of {{ employees.paginator.num_pages }}</span><div class="pagination-actions">
+    {% if employees.has_previous %}<a class="button button-secondary" rel="prev" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ employees.previous_page_number }}">Previous</a>{% else %}<span class="button button-secondary is-disabled" aria-disabled="true">Previous</span>{% endif %}
+    {% if employees.has_next %}<a class="button button-secondary" rel="next" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ employees.next_page_number }}">Next</a>{% else %}<span class="button button-secondary is-disabled" aria-disabled="true">Next</span>{% endif %}
+  </div></nav>{% endif %}
 </section>
 {% endblock %}

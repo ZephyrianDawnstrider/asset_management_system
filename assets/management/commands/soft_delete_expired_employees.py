@@ -4,11 +4,11 @@ from assets.models import Employee
 from assets.services import deactivate_employee
 
 class Command(BaseCommand):
-    help = 'Soft delete employees whose exit_date has passed and are still active'
+    help = 'Deactivate employees whose final active day has passed and return their assets'
 
     def handle(self, *args, **options):
         today = timezone.now().date()
-        expired_employees = Employee.objects.filter(exit_date__lte=today, is_active=True)
+        expired_employees = Employee.objects.filter(exit_date__lt=today, is_active=True)
         count = 0
         for employee in expired_employees:
             deactivate_employee(employee.pk, exit_date=employee.exit_date)

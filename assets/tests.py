@@ -1,9 +1,11 @@
 import csv
+from datetime import datetime, timezone as dt_timezone
 from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase, Client
 from django.urls import reverse
@@ -91,6 +93,9 @@ class AssetWorkflowTests(TestCase):
         response = self.client.get(reverse('employee_overview'))
         self.assertEqual(response.status_code, 302)
         self.assertIn('/accounts/login/', response['Location'])
+        history_response = self.client.get(reverse('asset_history', args=[self.asset.pk]))
+        self.assertEqual(history_response.status_code, 302)
+        self.assertIn('/accounts/login/', history_response['Location'])
 
     def test_overview_rows_and_csv_escape_formula_cells(self):
         self.first.name = '=2+3'
@@ -208,3 +213,143 @@ class AssetWorkflowTests(TestCase):
         self.first.refresh_from_db()
         self.assertFalse(self.first.is_active)
         self.assertEqual(self.first.name, 'Ari Updated')
+
+    def test_employee_list_filters_paginates_and_preserves_encoded_query(self):
+        for n in range(25):
+            Employee.objects.create(employee_id=f'EMP-X{n:02}', name=f'Person {n:02}',
+                                    department='Research & Development', designation='Engineer', start_date='2026-02-01')
+        self.client.force_login(self.staff)
+        url = reverse('employee_list')
+        response = self.client.get(url, {'q': 'Research & Development', 'department': 'Research & Development', 'page': '2'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['employees'].paginator.count, 25)
+        self.assertEqual(len(response.context['employees']), 5)
+        self.assertEqual(response.context['result_count'], 25)
+        self.assertEqual(response.context['filter_q'], 'Research & Development')
+        self.assertEqual(response.context['filter_department'], 'Research & Development')
+        self.assertIn('q=Research+%26+Development', response.context['page_query'])
+        self.assertIn('department=Research+%26+Development', response.context['page_query'])
+        malformed = self.client.get(url, {'page': 'invalid'})
+        self.assertEqual(malformed.status_code, 200)
+        self.assertEqual(malformed.context['employees'].number, 1)
+        out_of_range = self.client.get(url, {'page': '999'})
+        self.assertEqual(out_of_range.context['employees'].number, 2)
+        no_results = self.client.get(url, {'q': '<no such employee & item>'})
+        self.assertEqual(no_results.status_code, 200)
+        self.assertEqual(no_results.context['result_count'], 0)
+
+    def test_asset_list_filters_type_status_holder_and_pagination(self):
+        phone_type = AssetType.objects.create(name='Phone', identification_type_label='IMEI', object_description='Mobile')
+        for n in range(23):
+            Asset.objects.create(asset_type=phone_type, unique_identifier=f'PHONE-{n:02}', asset_name=f'Phone {n:02}',
+                                 assigned_to=self.second if n == 0 else None)
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('asset_list'), {'q': 'Sam Example', 'asset_type': phone_type.pk,
+                                                            'status': 'assigned', 'page': '1'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['result_count'], 1)
+        self.assertEqual(response.context['assets'][0].assigned_to, self.second)
+        self.assertEqual(response.context['filter_asset_type'], str(phone_type.pk))
+        self.assertEqual(response.context['filter_status'], 'assigned')
+        self.assertIn('q=Sam+Example', response.context['page_query'])
+        self.assertIn('asset_type=', response.context['page_query'])
+        self.assertIn('status=assigned', response.context['page_query'])
+        malformed = self.client.get(reverse('asset_list'), {'asset_type': 'nonsense', 'status': 'other', 'page': 'oops'})
+        self.assertEqual(malformed.status_code, 200)
+        self.assertEqual(malformed.context['filter_asset_type'], '')
+        self.assertEqual(malformed.context['filter_status'], '')
+        huge_id = self.client.get(reverse('asset_list'), {'asset_type': '9' * 200})
+        self.assertEqual(huge_id.status_code, 200)
+        page_two = self.client.get(reverse('asset_list'), {'asset_type': phone_type.pk, 'page': '2'})
+        self.assertEqual(page_two.context['assets'].number, 2)
+        self.assertEqual(len(page_two.context['assets']), 3)
+
+    def test_overview_totals_stay_global_while_employee_results_are_filtered(self):
+        for n in range(22):
+            Employee.objects.create(employee_id=f'EMP-P{n:02}', name=f'Page Person {n:02}',
+                                    department='Support', designation='Agent', start_date='2026-02-01')
+        self.asset.assigned_to = self.first
+        self.asset.save(update_fields=['assigned_to'])
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('employee_overview'), {'department': 'Support', 'page': '2'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['total_employees'], 24)
+        self.assertEqual(response.context['total_assets'], 1)
+        self.assertEqual(response.context['assigned_assets'], 1)
+        self.assertEqual(response.context['unassigned_assets_count'], 0)
+        self.assertEqual(response.context['result_count'], 22)
+        self.assertEqual(response.context['employees'].number, 2)
+        self.assertEqual(len(response.context['employee_rows']), 2)
+        self.assertIn('department=Support', response.context['page_query'])
+
+    def test_employee_and_retired_asset_history_are_fully_paginated(self):
+        for n in range(21):
+            AssignmentHistory.objects.create(asset=self.asset, employee=self.first, action='returned', actor=self.staff)
+        # Current employee history has more than one page and keeps page selection stable.
+        self.client.force_login(self.staff)
+        employee_response = self.client.get(reverse('employee_detail', args=[self.first.employee_id]), {'history_page': '2'})
+        self.assertEqual(employee_response.status_code, 200)
+        self.assertEqual(employee_response.context['history_page'].paginator.count, 21)
+        self.assertEqual(employee_response.context['history_page'].number, 2)
+        self.assertEqual(len(employee_response.context['assignment_history']), 1)
+        employee_first_page = self.client.get(reverse('employee_detail', args=[self.first.employee_id]), {'history_page': '1'})
+        self.assertContains(employee_first_page, 'history_page=2')
+
+        self.asset.is_active = False
+        self.asset.save(update_fields=['is_active'])
+        asset_response = self.client.get(reverse('asset_history', args=[self.asset.pk]), {'history_page': '2'})
+        self.assertEqual(asset_response.status_code, 200)
+        self.assertFalse(asset_response.context['asset'].is_active)
+        self.assertEqual(asset_response.context['history_page'].paginator.count, 21)
+        self.assertEqual(asset_response.context['history_page'].number, 2)
+        asset_first_page = self.client.get(reverse('asset_history', args=[self.asset.pk]), {'history_page': '1'})
+        self.assertContains(asset_first_page, 'history_page=2')
+
+    def test_both_expired_employee_commands_deactivate_after_final_active_day(self):
+        base_date = datetime(2026, 6, 15, 12, 0, tzinfo=dt_timezone.utc)
+        for command_name in ('deactivate_employees', 'soft_delete_expired_employees'):
+            with self.subTest(command=command_name):
+                employees = []
+                for suffix, exit_date in (('Y', '2026-06-14'), ('T', '2026-06-15'), ('F', '2026-06-16')):
+                    employee = Employee.objects.create(employee_id=f'CMD-{command_name}-{suffix}', name=f'{suffix} Employee',
+                                                       department='Ops', designation='Staff', start_date='2026-01-01',
+                                                       exit_date=exit_date)
+                    employees.append(employee)
+                    Asset.objects.create(asset_type=self.kind,
+                                         unique_identifier=f'{command_name}-{suffix}', asset_name=f'{suffix} asset',
+                                         assigned_to=employee)
+                command_module = __import__(f'assets.management.commands.{command_name}', fromlist=['timezone'])
+                with patch.object(command_module.timezone, 'now', return_value=base_date):
+                    call_command(command_name, verbosity=0)
+                for employee, expected_active in zip(employees, (False, True, True)):
+                    employee.refresh_from_db()
+                    self.assertEqual(employee.is_active, expected_active)
+                    asset = Asset.objects.get(unique_identifier=f'{command_name}-{employee.employee_id[-1]}')
+                    if expected_active:
+                        self.assertEqual(asset.assigned_to_id, employee.pk)
+                        self.assertFalse(AssignmentHistory.objects.filter(asset=asset).exists())
+                    else:
+                        self.assertIsNone(asset.assigned_to_id)
+                        self.assertEqual(AssignmentHistory.objects.filter(asset=asset, action='returned').count(), 1)
+
+    def test_employee_edit_uses_exit_date_as_final_active_day(self):
+        self.client.force_login(self.staff)
+        url = reverse('employee_update', args=[self.first.pk])
+        data = {'employee_id': self.first.employee_id, 'name': self.first.name, 'department': self.first.department,
+                'designation': self.first.designation, 'start_date': '2026-01-01', 'exit_date': '2026-10-03'}
+        with patch('assets.views.timezone.now', return_value=datetime(2026, 10, 3, 12, 0, tzinfo=dt_timezone.utc)):
+            response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 302)
+        self.first.refresh_from_db()
+        self.assertTrue(self.first.is_active)
+        yesterday = dict(data, exit_date='2026-10-02')
+        self.asset.assigned_to = self.first
+        self.asset.save(update_fields=['assigned_to'])
+        with patch('assets.views.timezone.now', return_value=datetime(2026, 10, 3, 12, 0, tzinfo=dt_timezone.utc)):
+            response = self.client.post(url, yesterday)
+        self.assertEqual(response.status_code, 302)
+        self.first.refresh_from_db()
+        self.asset.refresh_from_db()
+        self.assertFalse(self.first.is_active)
+        self.assertIsNone(self.asset.assigned_to_id)
+        self.assertTrue(AssignmentHistory.objects.filter(asset=self.asset, employee=self.first, action='returned').exists())

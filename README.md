@@ -45,3 +45,13 @@ Migration `0005_assignment_history_global_asset_serial` checks for duplicate ass
 This is a local v1 demonstration. SQLite is suitable for a single local operator and is not configured here for concurrent production use, multi-user write load, hosting, backups, monitoring, or operational recovery. Authentication and management screens are staff-gated; there is no employee self-service view or department-scoped access model. The repository’s development settings must be reviewed and replaced with deployment-appropriate secrets, host restrictions, transport security, database, and operational controls before hosting real employee or asset information.
 
 Dependencies are pinned in `requirements.txt` (Django 5.2.17 and django-allauth 65.19.7).
+
+## UI refinement — 2026-10-03 (v2)
+
+The employee directory and asset register support server-side search, filters, result counts, and pagination. The overview has the same employee filters and pages while its summary cards remain global totals. Employee and asset custody histories are available as complete, paginated timelines (20 events per page). The CSV action exports all active employees; it does not follow the current overview filters or page.
+
+At narrow screen widths, the current operator and sign-out action remain in the navigation, filter controls stack, tables scroll within their own region, and keyboard focus stays visible. Assignment and return actions show a saving status, prevent duplicate submissions, and restore the action after a failed request. These details do not change the staff-only access model or the separate return-then-assign workflow.
+
+An employee exit date is their final active day. Automatic offboarding runs after that date, when `exit_date` is before today. The explicit Deactivate action in the employee directory remains immediate and returns their assigned assets through the recorded workflow.
+
+This remains a local v1 demonstration with a v2 UI refinement: server-side pagination and clearer custody history do not make SQLite suitable for concurrent production writes or add hosting, backups, monitoring, operational recovery, employee self-service, or department-scoped access.

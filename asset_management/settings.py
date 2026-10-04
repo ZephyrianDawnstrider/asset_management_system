@@ -20,6 +20,18 @@ if DJANGO_ENV and DJANGO_ENV not in {"development", "test", "build", "production
     raise ImproperlyConfigured("DJANGO_ENV must be development, test, build, or production.")
 PRODUCTION = IS_RENDER or DJANGO_ENV == "production"
 BUILD_MODE = DJANGO_ENV == "build" and not IS_RENDER
+
+
+def _writes_paused():
+    value = os.environ.get("ASSET_WRITES_PAUSED", "").strip().lower()
+    if value in {"", "0", "false", "off"}:
+        return False
+    if value in {"1", "true", "on"}:
+        return True
+    raise ImproperlyConfigured("ASSET_WRITES_PAUSED must be true or false (also accepts 1/0 and on/off).")
+
+
+ASSET_WRITES_PAUSED = _writes_paused()
 SUPABASE_PROJECT_REF = "psusviqzkhlslmieuotb"
 ASSET_DB_SCHEMA = "assets_portfolio"
 ASSET_DB_RUNTIME_ROLE = "assets_portfolio_app"
@@ -67,6 +79,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "asset_management.write_fence.WriteFenceMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

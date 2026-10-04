@@ -2,11 +2,13 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from assets.models import Employee
 from assets.services import deactivate_employee
+from asset_management.write_fence import require_writes_unpaused
 
 class Command(BaseCommand):
     help = 'Deactivates employees after their final active day while preserving unresolved asset custody.'
 
     def handle(self, *args, **options):
+        require_writes_unpaused()
         today = timezone.now().date()
         employees_to_deactivate = Employee.objects.filter(is_active=True, exit_date__lt=today)
 

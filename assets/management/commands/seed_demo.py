@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connections, transaction
 
 from assets.models import Asset, AssetType, AssignmentHistory, Employee
+from asset_management.write_fence import require_writes_unpaused
 
 
 MARKER_TABLE = 'assets_demo_seed_state'
@@ -19,6 +20,7 @@ class Command(BaseCommand):
     help = 'Seed synthetic data into an explicitly selected, empty demo.sqlite3 database.'
 
     def handle(self, *args, **options):
+        require_writes_unpaused()
         alias = 'default'
         configured_path = connections[alias].settings_dict['NAME']
         explicit_path = os.environ.get('ASSET_DB_PATH')

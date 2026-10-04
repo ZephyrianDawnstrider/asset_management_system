@@ -1,10 +1,12 @@
 from django.core.management.base import BaseCommand
 from assets.models import Employee
+from asset_management.write_fence import require_writes_unpaused
 
 class Command(BaseCommand):
     help = 'Populate initial employee data'
 
     def handle(self, *args, **options):
+        require_writes_unpaused()
         employees_data = [
             {'employee_id': '1', 'department': 'account', 'name': 'Aditiya', 'designation': 'Accountant', 'start_date': '2023-01-01'},
             {'employee_id': '2', 'department': 'head', 'name': 'Benny', 'designation': 'Head', 'start_date': '2023-01-01'},

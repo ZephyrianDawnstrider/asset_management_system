@@ -1,4 +1,5 @@
 import csv
+from urllib.parse import urlencode
 
 from django.shortcuts import render, get_object_or_404, redirect
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView, DetailView, TemplateView
@@ -10,11 +11,19 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import F, Q
 from .models import Employee, AssetType, Asset, AssignmentHistory
 from .forms import AssetAssignmentForm, AssetAssignmentToEmployeeForm
 from django.views import View
 from .services import change_asset_assignment, deactivate_asset, deactivate_employee
+
+
+def safe_csv_cell(value):
+    value = '' if value is None else str(value)
+    # Spreadsheet programs may interpret leading whitespace before formula markers.
+    if value.lstrip(' \t\r\n\ufeff').startswith(('=', '+', '-', '@')):
+        return "'" + value
+    return value
 
 
 class GracefulPaginationMixin:
@@ -176,15 +185,8 @@ class AssetTypeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
             asset_type.save()
         return redirect('assettype_list')
 
-class AssetListView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationMixin, ListView):
-    model = Asset
-    template_name = 'assets/asset_list.html'
-    context_object_name = 'assets'
-    paginate_by = 20
-
-    def test_func(self):
-        return self.request.user.is_staff
-
+class AssetRegisterFilterMixin:
+    """One filter contract for the on-screen register and its CSV download."""
     def get_queryset(self):
         qs = Asset.objects.filter(is_active=True).select_related('asset_type', 'assigned_to')
         self.filter_q = self.request.GET.get('q', '').strip()[:100]
@@ -208,6 +210,16 @@ class AssetListView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationM
             self.filter_status = ''
         return qs.order_by('asset_name', 'unique_identifier', 'pk')
 
+
+class AssetListView(LoginRequiredMixin, UserPassesTestMixin, AssetRegisterFilterMixin, GracefulPaginationMixin, ListView):
+    model = Asset
+    template_name = 'assets/asset_list.html'
+    context_object_name = 'assets'
+    paginate_by = 20
+
+    def test_func(self):
+        return self.request.user.is_staff
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         if context.get('page_obj') is not None:
@@ -218,7 +230,30 @@ class AssetListView(LoginRequiredMixin, UserPassesTestMixin, GracefulPaginationM
         query = self.request.GET.copy()
         query.pop('page', None)
         context['page_query'] = query.urlencode()
+        context['export_query'] = urlencode({key: value for key, value in (
+            ('q', self.filter_q), ('asset_type', self.filter_asset_type), ('status', self.filter_status)
+        ) if value})
         return context
+
+
+class AssetRegisterCSVView(LoginRequiredMixin, UserPassesTestMixin, AssetRegisterFilterMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def get(self, request):
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="asset-register.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['asset_name', 'asset_type', 'unique_identifier', 'details',
+                         'status', 'holder_employee_id', 'holder_name'])
+        for asset in self.get_queryset().iterator():
+            writer.writerow([safe_csv_cell(value) for value in (
+                asset.asset_name, asset.asset_type.name, asset.unique_identifier, asset.details,
+                'Assigned' if asset.assigned_to_id else 'Available',
+                asset.assigned_to.employee_id if asset.assigned_to_id else '',
+                asset.assigned_to.name if asset.assigned_to_id else '',
+            )])
+        return response
 
 class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Asset
@@ -320,6 +355,12 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, Gracefu
         context['total_assets'] = Asset.objects.filter(is_active=True).count()
         context['assigned_assets'] = Asset.objects.filter(is_active=True, assigned_to__isnull=False).count()
         context['unassigned_assets_count'] = context['total_assets'] - context['assigned_assets']
+        context['available_assets'] = list(Asset.objects.filter(
+            is_active=True, assigned_to__isnull=True, asset_type__is_active=True
+        ).select_related('asset_type').order_by('asset_type__name', 'asset_name', 'pk')[:5])
+        context['recent_custody'] = list(AssignmentHistory.objects.select_related(
+            'asset', 'employee', 'actor'
+        ).order_by(F('occurred_at').desc(nulls_last=True), '-pk')[:5])
         context['asset_type_count'] = asset_types.count()
         context['filter_q'] = self.filter_q
         context['filter_department'] = self.filter_department
@@ -483,10 +524,7 @@ class EmployeeAssetOverviewCSVView(LoginRequiredMixin, UserPassesTestMixin, View
 
     @staticmethod
     def safe_cell(value):
-        value = '' if value is None else str(value)
-        if value.lstrip(' \t\r\n').startswith(('=', '+', '-', '@')):
-            return "'" + value
-        return value
+        return safe_csv_cell(value)
 
     def get(self, request):
         response = HttpResponse(content_type='text/csv; charset=utf-8')

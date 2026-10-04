@@ -12,6 +12,14 @@
   <div class="stat-card"><div class="stat-label">Currently assigned</div><div class="stat-value">{{ assigned_assets }}</div><div class="stat-meta">Active assets with a holder</div></div>
   <div class="stat-card"><div class="stat-label">Unassigned</div><div class="stat-value">{{ unassigned_assets_count }}</div><div class="stat-meta">Active assets without a current holder</div></div>
 </section>
+<section class="operations-grid" aria-label="Operations focus">
+  <article class="card operations-card"><div class="card-header"><div><p class="eyebrow">Ready for allocation</p><h2>Available assets</h2><p>Unassigned equipment in active categories. Review the register before assigning.</p></div><a class="button button-secondary button-small" href="{% url 'asset_list' %}?status=available">View register</a></div>
+    <ul class="operations-list">{% for asset in available_assets %}<li><span class="operations-main"><strong>{{ asset.asset_name }}</strong><small>{{ asset.asset_type.name }} · {{ asset.unique_identifier }}</small></span><a class="button button-secondary button-small" href="{% url 'asset_history' asset.pk %}">History</a></li>{% empty %}<li class="operations-empty">No available active assets in current categories.</li>{% endfor %}</ul>
+  </article>
+  <article class="card operations-card"><div class="card-header"><div><p class="eyebrow">Audit trail</p><h2>Recent custody</h2><p>Latest recorded assignment and return events, including retired records.</p></div></div>
+    <ul class="operations-list">{% for event in recent_custody %}<li><span class="operations-main"><strong>{{ event.get_action_display }} · {{ event.asset.asset_name }}</strong><small>{{ event.employee.name }} · {% if event.occurred_at %}{{ event.occurred_at|date:"M j, Y, g:i a" }}{% else %}Date unavailable{% endif %}</small></span><a class="button button-secondary button-small" href="{% url 'asset_history' event.asset.pk %}">Timeline</a></li>{% empty %}<li class="operations-empty">No custody events recorded yet.</li>{% endfor %}</ul>
+  </article>
+</section>
 <section class="card" aria-labelledby="coverage-title">
   <div class="card-header"><div><h2 id="coverage-title">Employee coverage</h2><p>Choose an employee to review equipment, return an item, or assign available assets.</p></div><a class="button button-primary button-small" href="{% url 'employee_create' %}">+ Add employee</a></div>
   <form class="filter-bar" method="get" action="{% url 'employee_overview' %}">

@@ -90,6 +90,11 @@ class AssetWorkflowTests(TestCase):
         self.assertFalse(AssignmentHistory.objects.exists())
 
     def test_anonymous_is_redirected_to_login(self):
+        landing = self.client.get(reverse('home'))
+        self.assertEqual(landing.status_code, 200)
+        self.assertContains(landing, 'From new equipment to a clear custody trail')
+        self.assertNotContains(landing, self.first.name)
+        self.assertNotContains(landing, self.asset.unique_identifier)
         response = self.client.get(reverse('employee_overview'))
         self.assertEqual(response.status_code, 302)
         self.assertIn('/accounts/login/', response['Location'])
@@ -109,6 +114,42 @@ class AssetWorkflowTests(TestCase):
         rows = list(csv.reader(StringIO(response.content.decode('utf-8'))))
         self.assertEqual(rows[1][1], "'=2+3")
         self.assertEqual(rows[1][7], 'No active assets')
+
+    def test_operations_overview_is_staff_only_and_links_to_real_history(self):
+        self.client.force_login(self.staff)
+        change_asset_assignment(self.asset.pk, self.first, self.staff, expected_employee_id=None)
+        change_asset_assignment(self.asset.pk, None, self.staff, expected_employee_id=self.first.pk)
+        AssignmentHistory.objects.create(asset=self.asset, employee=self.first, action='assigned', occurred_at=None)
+        response = self.client.get(reverse('employee_overview'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([asset.pk for asset in response.context['available_assets']], [self.asset.pk])
+        self.assertEqual([event.action for event in response.context['recent_custody']], ['returned', 'assigned', 'assigned'])
+        self.assertIsNone(response.context['recent_custody'][-1].occurred_at)
+        self.assertContains(response, reverse('asset_history', args=[self.asset.pk]))
+        self.client.force_login(self.nonstaff)
+        self.assertEqual(self.client.get(reverse('employee_overview')).status_code, 403)
+
+    def test_asset_register_csv_uses_filters_all_pages_and_escapes_formulas(self):
+        second = Asset.objects.create(asset_type=self.kind, unique_identifier='+2+3', asset_name='=Injected',
+                                      details='\t@formula')
+        for n in range(21):
+            Asset.objects.create(asset_type=self.kind, unique_identifier=f'EXTRA-{n:02}', asset_name='Other')
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('asset_register_csv'), {'q': 'Injected', 'status': 'available', 'page': '2'})
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(StringIO(response.content.decode('utf-8'))))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][:4], ["'=Injected", 'Laptop', "'+2+3", "'\t@formula"])
+        filtered = self.client.get(reverse('asset_register_csv'), {'asset_type': self.kind.pk, 'status': 'available'})
+        self.assertEqual(len(list(csv.reader(StringIO(filtered.content.decode('utf-8'))))), 24)
+        second.is_active = False
+        second.save(update_fields=['is_active'])
+        self.assertEqual(len(list(csv.reader(StringIO(self.client.get(reverse('asset_register_csv'),
+            {'q': 'Injected'}).content.decode('utf-8'))))), 1)
+        self.client.force_login(self.nonstaff)
+        self.assertEqual(self.client.get(reverse('asset_register_csv')).status_code, 403)
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse('asset_register_csv')).status_code, 302)
 
     def test_employee_and_asset_creation_and_global_serial_uniqueness(self):
         second_type = AssetType.objects.create(name='Phone', identification_type_label='IMEI', object_description='Phone')

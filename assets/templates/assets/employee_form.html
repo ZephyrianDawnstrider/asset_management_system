@@ -1,12 +1,14 @@
 {% extends 'assets/base.html' %}
+{% load static %}
 {% block title %}{% if object %}Edit employee{% else %}Add employee{% endif %}{% endblock %}
 {% block page_label %}Employees{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">People and custody</p><h1>{% if object %}Edit employee{% else %}Add employee{% endif %}</h1><p>Keep employee details current so equipment assignments stay clear.</p></div><a class="button button-secondary" href="{% url 'employee_list' %}">Back to employees</a></div>
-<div class="form-shell"><section class="card"><div class="card-body"><form method="post" class="form-grid">{% csrf_token %}
-  {% if form.non_field_errors %}<div class="field-wide form-errors">{{ form.non_field_errors }}</div>{% endif %}
-  {% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>{{ field }}{% if field.help_text %}<p class="field-help">{{ field.help_text }}</p>{% endif %}{% if field.errors %}<div class="form-errors">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
+<div class="form-shell"><section class="card"><div class="card-body"><form method="post" class="form-grid{% if form.errors %} js-server-error-form{% endif %}">{% csrf_token %}
+  {% if form.non_field_errors %}<div id="form-non-field-errors" class="field-wide form-errors" role="alert" tabindex="-1">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>{{ field }}{% if field.help_text %}<p class="field-help">{{ field.help_text }}</p>{% endif %}{% if field.errors %}<div id="{{ field.id_for_label }}-error" class="form-errors">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
   {% if form.exit_date %}<div class="field-wide helper-band">The exit date is the employee’s final active day. Automatic offboarding runs after that date, when the exit date is before today. To deactivate someone immediately, use the Deactivate action in the employee directory.</div>{% endif %}
   <div class="field-wide form-footer"><a class="button button-secondary" href="{% url 'employee_list' %}">Cancel</a><button class="button button-primary" type="submit">Save employee</button></div>
 </form></div></section></div>
 {% endblock %}
+{% block scripts %}{% if form.errors %}<script src="{% static 'assets/js/form-errors.js' %}" defer></script>{% endif %}{% endblock %}

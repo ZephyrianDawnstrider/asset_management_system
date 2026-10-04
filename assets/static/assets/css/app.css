@@ -61,6 +61,17 @@
 @media(max-width:1000px){.public-intro{grid-template-columns:1fr}.public-intro-actions{justify-content:flex-start;max-width:none}.public-intro-actions small{text-align:left}.public-demo-grid{grid-template-columns:1fr}.public-demo-register{border-right:0;border-bottom:1px solid var(--line)}}
 @media(max-width:700px){.public-sidebar-note{display:none}.public-intro{padding:22px 20px;gap:16px}.public-intro h1{font-size:27px}.public-intro-actions .button{flex:1;min-height:44px}.public-demo-header{align-items:flex-start;flex-direction:column;padding:15px}.public-demo-safety{max-width:none;width:100%}.public-demo-register,.public-demo-detail{padding:15px}.demo-choice-list button{min-height:54px}.demo-controls{align-items:stretch;flex-direction:column}.demo-assign-control{width:100%}.demo-assign-control select,.demo-assign-control .button,.demo-controls>.button{min-height:44px}.demo-feedback-row{align-items:flex-start;flex-direction:column}.public-workflow-grid{grid-template-columns:1fr}.public-access{align-items:flex-start;flex-direction:column}.public-access .button{width:100%;min-height:44px}}
 
+/* Keep every workspace destination visible at narrow widths and high zoom. */
+@media(max-width:700px){
+  .sidebar .staff-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;overflow:visible;padding-bottom:0}
+  .sidebar .staff-nav .nav-link,.sidebar .sidebar-bottom .nav-link{width:100%;min-width:0;min-height:44px;white-space:normal;line-height:1.25}
+  .sidebar .sidebar-bottom{display:block;margin-top:8px;padding-top:8px}
+  .sidebar .user-chip{display:flex;padding:8px 6px}
+  .sidebar .user-copy{min-width:0;overflow-wrap:anywhere}
+}
+.field [aria-invalid="true"]{border-color:var(--red)}
+.form-errors:focus{outline:3px solid var(--red);outline-offset:3px}
+
 /* Keep supporting copy readable at desktop and mobile widths. */
 .public-sidebar-note,.public-intro-actions small,.public-demo-header p:last-child,.public-demo-safety,.public-demo-safety strong,.demo-panel-heading span,.demo-overline,.public-demo-register label,.demo-assign-control label,.demo-field-hint,.demo-choice-list small,.demo-choice-list button>span:last-child,.demo-empty,.demo-asset-heading code,.demo-holder-card span,.demo-offboarding strong,.demo-offboarding p,.demo-feedback-row p,.demo-reset,.demo-timeline-panel h5,.demo-timeline-panel h5 span,.demo-timeline-panel ol,.public-workflow-grid span,.public-workflow-grid p,.public-access p:last-child{font-size:12px}
 .demo-selection-note{margin:0 0 10px;padding:8px 10px;border-radius:6px;background:#f1f5f7;color:#405569;font-size:12px}

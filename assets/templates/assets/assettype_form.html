@@ -1,11 +1,13 @@
 {% extends 'assets/base.html' %}
+{% load static %}
 {% block title %}{% if object %}Edit asset type{% else %}Add asset type{% endif %}{% endblock %}
 {% block page_label %}Asset types{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">Inventory configuration</p><h1>{% if object %}Edit asset type{% else %}Add asset type{% endif %}</h1><p>Choose a clear name and tell staff which identifier they should record.</p></div><a class="button button-secondary" href="{% url 'assettype_list' %}">Back to asset types</a></div>
-<div class="form-shell"><section class="card"><div class="card-body"><form method="post" class="form-grid">{% csrf_token %}
-  {% if form.non_field_errors %}<div class="field-wide form-errors">{{ form.non_field_errors }}</div>{% endif %}
-  {% for field in form %}<div class="field{% if field.name == 'object_description' %} field-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>{{ field }}{% if field.errors %}<div class="form-errors">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
+<div class="form-shell"><section class="card"><div class="card-body"><form method="post" class="form-grid{% if form.errors %} js-server-error-form{% endif %}">{% csrf_token %}
+  {% if form.non_field_errors %}<div id="form-non-field-errors" class="field-wide form-errors" role="alert" tabindex="-1">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form %}<div class="field{% if field.name == 'object_description' %} field-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>{{ field }}{% if field.errors %}<div id="{{ field.id_for_label }}-error" class="form-errors">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
   <div class="field-wide form-footer"><a class="button button-secondary" href="{% url 'assettype_list' %}">Cancel</a><button class="button button-primary" type="submit">Save type</button></div>
 </form></div></section></div>
 {% endblock %}
+{% block scripts %}{% if form.errors %}<script src="{% static 'assets/js/form-errors.js' %}" defer></script>{% endif %}{% endblock %}

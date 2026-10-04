@@ -90,9 +90,12 @@ class AssetWorkflowTests(TestCase):
         self.assertFalse(AssignmentHistory.objects.exists())
 
     def test_anonymous_is_redirected_to_login(self):
-        landing = self.client.get(reverse('home'))
+        with self.assertNumQueries(0):
+            landing = self.client.get(reverse('home'))
         self.assertEqual(landing.status_code, 200)
-        self.assertContains(landing, 'From new equipment to a clear custody trail')
+        self.assertContains(landing, 'One asset. A complete custody decision.')
+        self.assertContains(landing, 'SIMULATION ONLY · SYNTHETIC DATA')
+        self.assertContains(landing, 'assets/js/public-demo.js')
         self.assertNotContains(landing, self.first.name)
         self.assertNotContains(landing, self.asset.unique_identifier)
         response = self.client.get(reverse('employee_overview'))

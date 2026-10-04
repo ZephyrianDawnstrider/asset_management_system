@@ -31,19 +31,19 @@
         <form method="post" action="{% url 'account_logout' %}">{% csrf_token %}<button class="nav-link logout-link" type="submit"><span class="nav-icon" aria-hidden="true">↗</span> Sign out</button></form>
       </div>
       {% else %}
-      <div class="sidebar-note"><span class="status-dot"></span> Internal asset workspace</div>
+      {% if request.resolver_match.url_name == 'home' %}<div class="nav-caption">EXPLORE</div><nav class="nav-list public-nav" aria-label="Portfolio navigation"><a class="nav-link is-current" href="#demo"><span class="nav-icon" aria-hidden="true">◇</span> Interactive demo</a><a class="nav-link" href="#workflow"><span class="nav-icon" aria-hidden="true">⇄</span> Workflow</a><a class="nav-link" href="#access"><span class="nav-icon" aria-hidden="true">⌑</span> Access and audit</a></nav><div class="public-sidebar-note"><strong>Portfolio preview</strong><span>All demo names and assets are synthetic. Staff records require sign-in.</span></div>{% else %}<div class="sidebar-note"><span class="status-dot"></span> Authorized staff sign-in</div>{% endif %}
       {% endif %}
     </aside>
     <div class="main-column">
       <header class="topbar">
         <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">/</span><strong>{% block page_label %}Overview{% endblock %}</strong></div>
-        <div class="topbar-note"><span class="status-dot"></span> Inventory workspace</div>
+        <div class="topbar-note"><span class="status-dot"></span> {% if request.user.is_authenticated %}Inventory workspace{% else %}Portfolio preview{% endif %}</div>
       </header>
       <main id="main-content" class="page-content" tabindex="-1">
         {% if messages %}<div class="flash-stack" aria-live="polite">{% for message in messages %}<div class="flash-message{% if message.tags %} flash-{{ message.tags }}{% endif %}">{{ message }}</div>{% endfor %}</div>{% endif %}
         {% block content %}{% endblock %}
       </main>
-      <footer class="footer">Fieldnote Assets <span>·</span> Internal operations</footer>
+      <footer class="footer">Fieldnote Assets <span>·</span> {% if request.user.is_authenticated %}Internal operations{% else %}Synthetic walkthrough · staff access for real records{% endif %}</footer>
     </div>
   </div>
   {% block scripts %}{% endblock %}

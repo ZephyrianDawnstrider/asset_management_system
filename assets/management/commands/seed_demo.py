@@ -117,6 +117,7 @@ class Command(BaseCommand):
                     'asset_type': types[type_name],
                     'asset_name': name,
                     'assigned_to': employee,
+                    'disposition': Asset.Disposition.ASSIGNED if employee else Asset.Disposition.READY,
                     'details': 'Synthetic demo record.',
                     'is_active': True,
                 },

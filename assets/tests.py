@@ -6,13 +6,15 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase, Client
 from django.urls import reverse
 
-from .models import Asset, AssetType, AssignmentHistory, Employee
+from .models import Asset, AssetType, AssignmentHistory, AssetExceptionCase, Employee
 from .forms import AssetAssignmentForm
-from .services import change_asset_assignment, deactivate_employee
+from .services import (change_asset_assignment, deactivate_employee, record_physical_receipt,
+                       report_missing, release_inspection)
 
 
 class AssetWorkflowTests(TestCase):
@@ -26,6 +28,10 @@ class AssetWorkflowTests(TestCase):
         self.kind = AssetType.objects.create(name='Laptop', identification_type_label='Serial', object_description='Portable computer')
         self.asset = Asset.objects.create(asset_type=self.kind, unique_identifier='SERIAL-001', asset_name='Work laptop')
 
+    def hold(self, asset, employee):
+        Asset.objects.filter(pk=asset.pk).update(assigned_to=employee, disposition=Asset.Disposition.ASSIGNED)
+        asset.refresh_from_db()
+
     def test_staff_can_assign_return_and_reassign_with_history(self):
         self.client.force_login(self.staff)
         assign = reverse('assign_asset_to_employee')
@@ -36,10 +42,13 @@ class AssetWorkflowTests(TestCase):
         self.assertEqual(self.asset.assigned_to, self.first)
 
         response = self.client.post(reverse('unassign_asset', args=[self.asset.pk]),
-                                    {'expected_employee_id': self.first.pk})
+                                    {'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+                                     'condition': 'usable'})
         self.assertEqual(response.status_code, 200)
         self.asset.refresh_from_db()
         self.assertIsNone(self.asset.assigned_to)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.READY)
+        self.assertEqual(self.asset.assignment_history.get(action='returned').receipt_condition, 'usable')
 
         response = self.client.post(assign, {'employee_id': self.second.employee_id, 'asset_id': self.asset.pk})
         self.assertEqual(response.status_code, 200)
@@ -48,14 +57,144 @@ class AssetWorkflowTests(TestCase):
         self.assertTrue(all(entry.actor == self.staff for entry in self.asset.assignment_history.all()))
 
     def test_return_rejects_stale_employee_id(self):
-        self.asset.assigned_to = self.second
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.second)
         self.client.force_login(self.staff)
         response = self.client.post(reverse('unassign_asset', args=[self.asset.pk]),
-                                    {'expected_employee_id': self.first.pk})
+                                    {'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+                                     'condition': 'usable'})
         self.assertEqual(response.status_code, 409)
         self.asset.refresh_from_db()
         self.assertEqual(self.asset.assigned_to, self.second)
+        self.assertFalse(AssignmentHistory.objects.exists())
+
+    def test_damaged_receipt_requires_inspection_before_ready(self):
+        change_asset_assignment(self.asset.pk, self.first, self.staff, expected_employee_id=None)
+        self.client.force_login(self.staff)
+        response = self.client.post(reverse('unassign_asset', args=[self.asset.pk]), {
+            'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+            'condition': 'damaged', 'note': 'Cracked hinge', 'observed_at': '2026-10-04T14:20',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.asset.refresh_from_db()
+        self.assertIsNone(self.asset.assigned_to_id)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.INSPECTION_HOLD)
+        case = AssetExceptionCase.objects.get(asset=self.asset, resolved_at__isnull=True)
+        self.assertEqual(case.kind, AssetExceptionCase.Kind.INSPECTION)
+        self.assertEqual(case.opened_by, self.staff)
+        self.assertIsNotNone(case.observed_at)
+        receipt = AssignmentHistory.objects.get(asset=self.asset, action='returned')
+        self.assertEqual((receipt.receipt_condition, receipt.source, receipt.case_id),
+                         ('damaged', 'staff', case.pk))
+        self.assertFalse(Asset.objects.filter(pk=self.asset.pk, disposition='ready').exists())
+        self.assertNotIn(self.asset.pk, [item['id'] for item in self.client.get(
+            reverse('unassigned_assets_api', args=[self.kind.pk])).json()])
+        self.assertEqual(self.client.post(reverse('assign_asset_to_employee'), {
+            'employee_id': self.second.employee_id, 'asset_id': self.asset.pk,
+        }).status_code, 409)
+        release = self.client.post(reverse('release_inspection', args=[self.asset.pk]), {
+            'note': 'Repaired and passed inspection',
+        })
+        self.assertEqual(release.status_code, 200)
+        self.asset.refresh_from_db()
+        case.refresh_from_db()
+        self.assertEqual(self.asset.disposition, Asset.Disposition.READY)
+        self.assertEqual(case.resolved_by, self.staff)
+        self.assertEqual(case.resolution_note, 'Repaired and passed inspection')
+        self.assertTrue(AssignmentHistory.objects.filter(
+            asset=self.asset, case=case, action='inspection_released', employee__isnull=True,
+        ).exists())
+        self.assertEqual(self.client.post(reverse('assign_asset_to_employee'), {
+            'employee_id': self.second.employee_id, 'asset_id': self.asset.pk,
+        }).status_code, 200)
+
+    def test_missing_asset_keeps_inactive_holder_until_physical_receipt(self):
+        self.hold(self.asset, self.first)
+        self.client.force_login(self.staff)
+        report = self.client.post(reverse('report_missing_asset', args=[self.asset.pk]), {
+            'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+            'note': 'Not received at exit interview',
+        })
+        self.assertEqual(report.status_code, 200)
+        self.client.post(reverse('employee_soft_delete', args=[self.first.employee_id]))
+        self.asset.refresh_from_db()
+        self.first.refresh_from_db()
+        self.assertFalse(self.first.is_active)
+        self.assertEqual(self.asset.assigned_to_id, self.first.pk)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.MISSING)
+        self.assertFalse(AssignmentHistory.objects.filter(asset=self.asset, action='returned').exists())
+        case = AssetExceptionCase.objects.get(asset=self.asset, resolved_at__isnull=True)
+        self.assertEqual(case.kind, AssetExceptionCase.Kind.MISSING)
+        self.assertContains(self.client.get(reverse('employee_detail', args=[self.first.employee_id])),
+                            'Record physical receipt')
+        receipt = self.client.post(reverse('unassign_asset', args=[self.asset.pk]), {
+            'expected_employee_id': self.first.pk, 'expected_disposition': 'missing',
+            'condition': 'usable', 'note': 'Recovered from locker and checked',
+        })
+        self.assertEqual(receipt.status_code, 200)
+        self.asset.refresh_from_db()
+        case.refresh_from_db()
+        self.assertEqual(self.asset.disposition, Asset.Disposition.READY)
+        self.assertIsNone(self.asset.assigned_to_id)
+        self.assertEqual(case.resolved_by, self.staff)
+        self.assertEqual(AssignmentHistory.objects.get(asset=self.asset, action='returned').case_id, case.pk)
+
+    def test_stale_condition_and_missing_report_do_not_duplicate_events(self):
+        self.hold(self.asset, self.first)
+        report_missing(self.asset.pk, self.staff, expected_employee_id=self.first.pk,
+                       expected_disposition='assigned', note='Unreceived after collection')
+        before = AssignmentHistory.objects.count()
+        self.client.force_login(self.staff)
+        stale = self.client.post(reverse('unassign_asset', args=[self.asset.pk]), {
+            'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+            'condition': 'usable',
+        })
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(AssignmentHistory.objects.count(), before)
+        self.assertEqual(AssetExceptionCase.objects.filter(asset=self.asset, resolved_at__isnull=True).count(), 1)
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.disposition, Asset.Disposition.MISSING)
+
+    def test_case_page_preserves_opening_reason_and_shows_latest_finding(self):
+        self.hold(self.asset, self.first)
+        deactivate_employee(self.first.pk, self.staff)
+        case = AssetExceptionCase.objects.get(asset=self.asset, resolved_at__isnull=True)
+        opening_reason = case.reason
+        report_missing(self.asset.pk, self.staff, expected_employee_id=self.first.pk,
+                       expected_disposition='recovery_pending', note='Locker search found no laptop')
+        case.refresh_from_db()
+        self.assertEqual(case.reason, opening_reason)
+        self.assertEqual(case.kind, AssetExceptionCase.Kind.MISSING)
+        self.assertEqual(AssetExceptionCase.objects.filter(asset=self.asset, resolved_at__isnull=True).count(), 1)
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('asset_history', args=[self.asset.pk]))
+        self.assertContains(response, 'Opening reason:')
+        self.assertContains(response, opening_reason)
+        self.assertContains(response, 'Latest finding:')
+        self.assertContains(response, 'Locker search found no laptop')
+
+    def test_exception_case_uniqueness_and_disposition_constraint(self):
+        self.hold(self.asset, self.first)
+        report_missing(self.asset.pk, self.staff, expected_employee_id=self.first.pk,
+                       expected_disposition='assigned', note='Unreceived')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AssetExceptionCase.objects.create(
+                asset=self.asset, kind='missing', reason='Duplicate', source='staff',
+                opened_by=self.staff,
+            )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Asset.objects.filter(pk=self.asset.pk).update(assigned_to=None)
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.assigned_to_id, self.first.pk)
+
+    def test_exception_transition_rolls_back_case_and_state_if_event_fails(self):
+        self.hold(self.asset, self.first)
+        with patch('assets.services._event', side_effect=ValidationError('event failure')):
+            with self.assertRaises(ValidationError):
+                report_missing(self.asset.pk, self.staff, expected_employee_id=self.first.pk,
+                               expected_disposition='assigned', note='Unreceived')
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.disposition, Asset.Disposition.ASSIGNED)
+        self.assertFalse(AssetExceptionCase.objects.exists())
         self.assertFalse(AssignmentHistory.objects.exists())
 
     def test_inactive_entities_cannot_be_assigned(self):
@@ -85,6 +224,10 @@ class AssetWorkflowTests(TestCase):
         response = self.client.post(reverse('assign_asset_to_employee'),
                                     {'employee_id': self.first.employee_id, 'asset_id': self.asset.pk})
         self.assertEqual(response.status_code, 403)
+        for url in (reverse('unassign_asset', args=[self.asset.pk]),
+                    reverse('report_missing_asset', args=[self.asset.pk]),
+                    reverse('release_inspection', args=[self.asset.pk])):
+            self.assertEqual(self.client.post(url, {'note': 'untrusted'}).status_code, 403)
         self.asset.refresh_from_db()
         self.assertIsNone(self.asset.assigned_to)
         self.assertFalse(AssignmentHistory.objects.exists())
@@ -121,7 +264,8 @@ class AssetWorkflowTests(TestCase):
     def test_operations_overview_is_staff_only_and_links_to_real_history(self):
         self.client.force_login(self.staff)
         change_asset_assignment(self.asset.pk, self.first, self.staff, expected_employee_id=None)
-        change_asset_assignment(self.asset.pk, None, self.staff, expected_employee_id=self.first.pk)
+        record_physical_receipt(self.asset.pk, self.staff, expected_employee_id=self.first.pk,
+                                expected_disposition=Asset.Disposition.ASSIGNED, condition='usable')
         AssignmentHistory.objects.create(asset=self.asset, employee=self.first, action='assigned', occurred_at=None)
         response = self.client.get(reverse('employee_overview'))
         self.assertEqual(response.status_code, 200)
@@ -196,10 +340,13 @@ class AssetWorkflowTests(TestCase):
         response = csrf_client.post(reverse('assign_asset_to_employee'),
                                     {'employee_id': self.first.employee_id, 'asset_id': self.asset.pk})
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(csrf_client.post(reverse('report_missing_asset', args=[self.asset.pk]), {
+            'expected_employee_id': self.first.pk, 'expected_disposition': 'assigned',
+            'note': 'No receipt',
+        }).status_code, 403)
 
     def test_stale_expected_owner_cannot_reassign_or_write_history(self):
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.first)
         with self.assertRaises(ValidationError):
             change_asset_assignment(self.asset.pk, self.second, self.staff, expected_employee_id=None)
         self.asset.refresh_from_db()
@@ -219,12 +366,13 @@ class AssetWorkflowTests(TestCase):
         self.assertEqual(self.client.get('/admin/auth/user/').status_code, 200)
         self.assertEqual(self.client.post(f'/admin/auth/user/{self.staff.pk}/delete/').status_code, 403)
 
-    def test_employee_offboarding_rolls_back_every_return_on_failure(self):
-        other = Asset.objects.create(asset_type=self.kind, unique_identifier='SERIAL-002', asset_name='Second laptop', assigned_to=self.first)
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+    def test_employee_offboarding_rolls_back_every_pending_case_on_failure(self):
+        other = Asset.objects.create(asset_type=self.kind, unique_identifier='SERIAL-002',
+                                     asset_name='Second laptop', assigned_to=self.first,
+                                     disposition=Asset.Disposition.ASSIGNED)
+        self.hold(self.asset, self.first)
         from . import services
-        original = services.change_asset_assignment
+        original = services._open_case
         calls = 0
 
         def fail_on_second(*args, **kwargs):
@@ -234,7 +382,7 @@ class AssetWorkflowTests(TestCase):
                 raise ValidationError('simulated second transition failure')
             return original(*args, **kwargs)
 
-        with patch('assets.services.change_asset_assignment', side_effect=fail_on_second):
+        with patch('assets.services._open_case', side_effect=fail_on_second):
             with self.assertRaises(ValidationError):
                 deactivate_employee(self.first.pk, self.staff)
         self.first.refresh_from_db()
@@ -243,6 +391,8 @@ class AssetWorkflowTests(TestCase):
         self.assertTrue(self.first.is_active)
         self.assertEqual(self.asset.assigned_to, self.first)
         self.assertEqual(other.assigned_to, self.first)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.ASSIGNED)
+        self.assertFalse(AssetExceptionCase.objects.exists())
         self.assertFalse(AssignmentHistory.objects.exists())
 
     def test_employee_edit_does_not_revive_concurrently_deactivated_record(self):
@@ -286,7 +436,8 @@ class AssetWorkflowTests(TestCase):
         phone_type = AssetType.objects.create(name='Phone', identification_type_label='IMEI', object_description='Mobile')
         for n in range(23):
             Asset.objects.create(asset_type=phone_type, unique_identifier=f'PHONE-{n:02}', asset_name=f'Phone {n:02}',
-                                 assigned_to=self.second if n == 0 else None)
+                                 assigned_to=self.second if n == 0 else None,
+                                 disposition=Asset.Disposition.ASSIGNED if n == 0 else Asset.Disposition.READY)
         self.client.force_login(self.staff)
         response = self.client.get(reverse('asset_list'), {'q': 'Sam Example', 'asset_type': phone_type.pk,
                                                             'status': 'assigned', 'page': '1'})
@@ -312,8 +463,7 @@ class AssetWorkflowTests(TestCase):
         for n in range(22):
             Employee.objects.create(employee_id=f'EMP-P{n:02}', name=f'Page Person {n:02}',
                                     department='Support', designation='Agent', start_date='2026-02-01')
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.first)
         self.client.force_login(self.staff)
         response = self.client.get(reverse('employee_overview'), {'department': 'Support', 'page': '2'})
         self.assertEqual(response.status_code, 200)
@@ -331,8 +481,7 @@ class AssetWorkflowTests(TestCase):
         self.first.save(update_fields=['exit_date'])
         self.second.exit_date = '2026-10-18'
         self.second.save(update_fields=['exit_date'])
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.first)
         for suffix, exit_date, active_employee, active_asset in (
             ('FUTURE', '2026-10-19', True, True),
             ('NONE', None, True, True),
@@ -343,9 +492,10 @@ class AssetWorkflowTests(TestCase):
                                                designation='Analyst', start_date='2026-01-01',
                                                exit_date=exit_date, is_active=active_employee)
             Asset.objects.create(asset_type=self.kind, unique_identifier=f'SERIAL-{suffix}', asset_name=suffix,
-                                 assigned_to=employee, is_active=active_asset)
+                                 assigned_to=employee, is_active=active_asset,
+                                 disposition=Asset.Disposition.RECOVERY_PENDING if not active_employee else Asset.Disposition.ASSIGNED)
         Asset.objects.create(asset_type=self.kind, unique_identifier='SERIAL-BOUNDARY', asset_name='Boundary asset',
-                             assigned_to=self.second)
+                             assigned_to=self.second, disposition=Asset.Disposition.ASSIGNED)
         self.client.force_login(self.staff)
         with patch('assets.views.timezone.now', return_value=datetime(2026, 10, 4, 12, tzinfo=dt_timezone.utc)):
             response = self.client.get(reverse('employee_overview'))
@@ -353,6 +503,7 @@ class AssetWorkflowTests(TestCase):
         self.assertEqual(response.context['offboarding_total'], 2)
         self.assertEqual([(person.employee_id, person.held_asset_count) for person in response.context['offboarding_queue']],
                          [('EMP-01', 1), ('EMP-02', 1)])
+        self.assertEqual(response.context['inactive_unresolved_total'], 1)
         self.assertContains(response, 'Final day passed')
         self.assertContains(response, 'Upcoming final day')
         self.assertContains(response, 'A final active day is not a return due date.')
@@ -361,31 +512,32 @@ class AssetWorkflowTests(TestCase):
         self.client.logout()
         self.assertEqual(self.client.get(reverse('employee_overview')).status_code, 302)
 
-    def test_offboarding_detail_deactivation_preserves_history_and_becomes_read_only(self):
+    def test_offboarding_detail_deactivation_preserves_unreceived_custody(self):
         self.first.exit_date = '2026-10-04'
         self.first.save(update_fields=['exit_date'])
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.first)
         self.client.force_login(self.staff)
         detail_url = reverse('employee_detail', args=[self.first.employee_id])
         active = self.client.get(detail_url)
         self.assertContains(active, 'Offboarding checklist')
-        self.assertContains(active, 'Deactivate now and return held assets')
-        self.assertContains(active, 'Return asset')
+        self.assertContains(active, 'Deactivate profile; keep unresolved custody')
+        self.assertContains(active, 'Record physical receipt')
         response = self.client.post(reverse('employee_soft_delete', args=[self.first.employee_id]))
         self.assertEqual(response.status_code, 302)
         self.first.refresh_from_db()
         self.asset.refresh_from_db()
         self.assertFalse(self.first.is_active)
-        self.assertIsNone(self.asset.assigned_to_id)
-        self.assertTrue(AssignmentHistory.objects.filter(asset=self.asset, employee=self.first, action='returned').exists())
+        self.assertEqual(self.asset.assigned_to_id, self.first.pk)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.RECOVERY_PENDING)
+        self.assertFalse(AssignmentHistory.objects.filter(asset=self.asset, action='returned').exists())
+        self.assertTrue(AssetExceptionCase.objects.filter(asset=self.asset, resolved_at__isnull=True).exists())
         inactive = self.client.get(detail_url)
-        self.assertContains(inactive, 'Inactive record · read-only')
-        self.assertContains(inactive, 'Returned')
+        self.assertContains(inactive, 'Inactive employee profile.')
+        self.assertContains(inactive, 'Recovery pending')
         self.assertNotContains(inactive, 'Edit employee')
-        self.assertNotContains(inactive, 'Return asset')
-        self.assertNotContains(inactive, 'Assign available equipment')
-        self.assertNotContains(inactive, 'Deactivate now and return held assets')
+        self.assertContains(inactive, 'Record physical receipt')
+        self.assertNotContains(inactive, 'Assign ready equipment')
+        self.assertNotContains(inactive, 'Deactivate profile; keep unresolved custody')
         self.assertEqual(self.client.get(reverse('employee_update', args=[self.first.pk])).status_code, 404)
         self.assertEqual(self.client.get(reverse('employee_delete', args=[self.first.employee_id])).status_code, 404)
 
@@ -424,7 +576,7 @@ class AssetWorkflowTests(TestCase):
                     employees.append(employee)
                     Asset.objects.create(asset_type=self.kind,
                                          unique_identifier=f'{command_name}-{suffix}', asset_name=f'{suffix} asset',
-                                         assigned_to=employee)
+                                         assigned_to=employee, disposition=Asset.Disposition.ASSIGNED)
                 command_module = __import__(f'assets.management.commands.{command_name}', fromlist=['timezone'])
                 with patch.object(command_module.timezone, 'now', return_value=base_date):
                     call_command(command_name, verbosity=0)
@@ -436,8 +588,11 @@ class AssetWorkflowTests(TestCase):
                         self.assertEqual(asset.assigned_to_id, employee.pk)
                         self.assertFalse(AssignmentHistory.objects.filter(asset=asset).exists())
                     else:
-                        self.assertIsNone(asset.assigned_to_id)
-                        self.assertEqual(AssignmentHistory.objects.filter(asset=asset, action='returned').count(), 1)
+                        self.assertEqual(asset.assigned_to_id, employee.pk)
+                        self.assertEqual(asset.disposition, Asset.Disposition.RECOVERY_PENDING)
+                        self.assertEqual(AssignmentHistory.objects.filter(
+                            asset=asset, action='recovery_pending', source='scheduled').count(), 1)
+                        self.assertFalse(AssignmentHistory.objects.filter(asset=asset, action='returned').exists())
 
     def test_employee_edit_uses_exit_date_as_final_active_day(self):
         self.client.force_login(self.staff)
@@ -450,13 +605,14 @@ class AssetWorkflowTests(TestCase):
         self.first.refresh_from_db()
         self.assertTrue(self.first.is_active)
         yesterday = dict(data, exit_date='2026-10-02')
-        self.asset.assigned_to = self.first
-        self.asset.save(update_fields=['assigned_to'])
+        self.hold(self.asset, self.first)
         with patch('assets.views.timezone.now', return_value=datetime(2026, 10, 3, 12, 0, tzinfo=dt_timezone.utc)):
             response = self.client.post(url, yesterday)
         self.assertEqual(response.status_code, 302)
         self.first.refresh_from_db()
         self.asset.refresh_from_db()
         self.assertFalse(self.first.is_active)
-        self.assertIsNone(self.asset.assigned_to_id)
-        self.assertTrue(AssignmentHistory.objects.filter(asset=self.asset, employee=self.first, action='returned').exists())
+        self.assertEqual(self.asset.assigned_to_id, self.first.pk)
+        self.assertEqual(self.asset.disposition, Asset.Disposition.RECOVERY_PENDING)
+        self.assertTrue(AssignmentHistory.objects.filter(
+            asset=self.asset, employee=self.first, action='recovery_pending', source='staff').exists())

@@ -3,7 +3,7 @@
 {% block page_label %}Add an asset{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">Inventory intake</p><h1>Add an asset</h1><p>Create an equipment record first. Assign it to an employee from their record after it is saved.</p></div><a class="button button-secondary" href="{% url 'asset_list' %}">View asset register</a></div>
-<div class="form-shell"><section class="card"><div class="card-header"><div><h2>Asset details</h2><p>New assets start in the available pool.</p></div></div><div class="card-body">
+<div class="form-shell"><section class="card"><div class="card-header"><div><h2>Asset details</h2><p>New assets start ready for assignment.</p></div></div><div class="card-body">
 <form method="post" class="form-grid">{% csrf_token %}
   {% if form.non_field_errors %}<div class="field-wide form-errors">{{ form.non_field_errors }}</div>{% endif %}
   {% for field in form %}<div class="field{% if field.name == 'details' %} field-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>{{ field }}{% if field.help_text %}<p class="field-help">{{ field.help_text }}</p>{% endif %}{% if field.errors %}<div class="form-errors">{{ field.errors }}</div>{% endif %}</div>{% endfor %}

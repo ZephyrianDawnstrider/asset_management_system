@@ -4,7 +4,7 @@ from assets.models import Employee
 from assets.services import deactivate_employee
 
 class Command(BaseCommand):
-    help = 'Deactivate employees whose final active day has passed and return their assets'
+    help = 'Deactivate employees whose final active day has passed without claiming asset receipt'
 
     def handle(self, *args, **options):
         today = timezone.now().date()

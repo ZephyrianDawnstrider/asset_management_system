@@ -36,7 +36,34 @@ class AssetAssignmentForm(forms.ModelForm):
 
 class AssetAssignmentToEmployeeForm(forms.Form):
     asset_id = forms.ModelChoiceField(
-        queryset=Asset.objects.filter(assigned_to__isnull=True),
+        queryset=Asset.objects.filter(assigned_to__isnull=True, disposition=Asset.Disposition.READY),
         empty_label="Select an unassigned asset",
         widget=forms.Select(attrs={'class': 'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500'})
     )
+
+
+class PhysicalReceiptForm(forms.Form):
+    expected_employee_id = forms.IntegerField(min_value=1)
+    expected_disposition = forms.ChoiceField(choices=Asset.Disposition.choices)
+    condition = forms.ChoiceField(choices=[('usable', 'Received usable'), ('damaged', 'Received damaged')])
+    note = forms.CharField(required=False, max_length=2000, strip=True)
+    observed_at = forms.DateTimeField(required=False, input_formats=['%Y-%m-%dT%H:%M'])
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('condition') == 'damaged' and not cleaned.get('note'):
+            self.add_error('note', 'Describe the damage.')
+        if cleaned.get('expected_disposition') in ('recovery_pending', 'missing') and not cleaned.get('note'):
+            self.add_error('note', 'Record how the outstanding asset was recovered.')
+        return cleaned
+
+
+class MissingReportForm(forms.Form):
+    expected_employee_id = forms.IntegerField(min_value=1)
+    expected_disposition = forms.ChoiceField(choices=Asset.Disposition.choices)
+    note = forms.CharField(max_length=2000, strip=True)
+    observed_at = forms.DateTimeField(required=False, input_formats=['%Y-%m-%dT%H:%M'])
+
+
+class InspectionReleaseForm(forms.Form):
+    note = forms.CharField(max_length=2000, strip=True)

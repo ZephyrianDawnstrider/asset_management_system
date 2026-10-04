@@ -15,7 +15,7 @@
       }
       if (feedback) {
         feedback.setAttribute('role', 'status');
-        feedback.textContent = 'Saving assignment…';
+        feedback.textContent = 'Saving action…';
       }
       try {
         const response = await fetch(form.action, {

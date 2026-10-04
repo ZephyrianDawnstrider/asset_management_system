@@ -35,5 +35,7 @@ urlpatterns = [
     # Assignment actions
     path('assign-asset/', views.AssignAssetToEmployeeView.as_view(), name='assign_asset_to_employee'),
     path('unassign-asset/<int:asset_id>/', views.UnassignAssetView.as_view(), name='unassign_asset'),
+    path('assets/<int:asset_id>/report-missing/', views.ReportMissingAssetView.as_view(), name='report_missing_asset'),
+    path('assets/<int:asset_id>/release-inspection/', views.ReleaseInspectionView.as_view(), name='release_inspection'),
     path('api/unassigned-assets/<int:asset_type_id>/', views.UnassignedAssetsAPIView.as_view(), name='unassigned_assets_api'),
 ]

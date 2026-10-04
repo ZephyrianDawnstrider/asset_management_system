@@ -13,10 +13,12 @@ from django.db import transaction
 from django.http import Http404, JsonResponse, HttpResponse
 from django.utils import timezone
 from django.db.models import Count, F, Q
-from .models import Employee, AssetType, Asset, AssignmentHistory
-from .forms import AssetAssignmentForm, AssetAssignmentToEmployeeForm
+from .models import Employee, AssetType, Asset, AssignmentHistory, AssetExceptionCase
+from .forms import (AssetAssignmentForm, AssetAssignmentToEmployeeForm, PhysicalReceiptForm,
+                    MissingReportForm, InspectionReleaseForm)
 from django.views import View
-from .services import change_asset_assignment, deactivate_asset, deactivate_employee
+from .services import (change_asset_assignment, deactivate_asset, deactivate_employee,
+                       record_physical_receipt, report_missing, release_inspection)
 
 
 def safe_csv_cell(value):
@@ -207,8 +209,9 @@ class AssetRegisterFilterMixin:
                 self.filter_asset_type = ''
         except (TypeError, ValueError):
             self.filter_asset_type = ''
-        if self.filter_status in ('assigned', 'available'):
-            qs = qs.filter(assigned_to__isnull=(self.filter_status == 'available'))
+        if self.filter_status in ('assigned', 'available', 'recovery_pending', 'missing', 'inspection_hold'):
+            disposition = 'ready' if self.filter_status == 'available' else self.filter_status
+            qs = qs.filter(disposition=disposition)
         else:
             self.filter_status = ''
         return qs.order_by('asset_name', 'unique_identifier', 'pk')
@@ -252,7 +255,7 @@ class AssetRegisterCSVView(LoginRequiredMixin, UserPassesTestMixin, AssetRegiste
         for asset in self.get_queryset().iterator():
             writer.writerow([safe_csv_cell(value) for value in (
                 asset.asset_name, asset.asset_type.name, asset.unique_identifier, asset.details,
-                'Assigned' if asset.assigned_to_id else 'Available',
+                asset.get_disposition_display(),
                 asset.assigned_to.employee_id if asset.assigned_to_id else '',
                 asset.assigned_to.name if asset.assigned_to_id else '',
             )])
@@ -270,7 +273,7 @@ class AssetUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         form.fields['asset_type'].queryset = AssetType.objects.filter(is_active=True)
-        if self.object.assigned_to_id:
+        if self.object.disposition != Asset.Disposition.READY:
             form.fields['asset_type'].disabled = True
         return form
 
@@ -357,7 +360,12 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, Gracefu
         context['total_employees'] = Employee.objects.filter(is_active=True).count()
         context['total_assets'] = Asset.objects.filter(is_active=True).count()
         context['assigned_assets'] = Asset.objects.filter(is_active=True, assigned_to__isnull=False).count()
-        context['unassigned_assets_count'] = context['total_assets'] - context['assigned_assets']
+        context['unassigned_assets_count'] = Asset.objects.filter(
+            is_active=True, disposition=Asset.Disposition.READY, asset_type__is_active=True,
+        ).count()
+        context['inspection_hold_count'] = Asset.objects.filter(
+            is_active=True, disposition=Asset.Disposition.INSPECTION_HOLD,
+        ).count()
         today = timezone.now().date()
         offboarding = Employee.objects.filter(
             is_active=True, exit_date__isnull=False, exit_date__lte=today + timedelta(days=14)
@@ -367,8 +375,18 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, Gracefu
         context['offboarding_today'] = today
         context['offboarding_total'] = offboarding.count()
         context['offboarding_queue'] = list(offboarding[:8])
+        unresolved = Employee.objects.filter(
+            is_active=False, asset__is_active=True,
+            asset__disposition__in=[Asset.Disposition.RECOVERY_PENDING, Asset.Disposition.MISSING],
+        ).annotate(held_asset_count=Count('asset', filter=Q(
+            asset__is_active=True,
+            asset__disposition__in=[Asset.Disposition.RECOVERY_PENDING, Asset.Disposition.MISSING],
+        ))).distinct().order_by('name', 'pk')
+        context['inactive_unresolved_total'] = unresolved.count()
+        context['inactive_unresolved_queue'] = list(unresolved[:8])
         context['available_assets'] = list(Asset.objects.filter(
-            is_active=True, assigned_to__isnull=True, asset_type__is_active=True
+            is_active=True, assigned_to__isnull=True, disposition=Asset.Disposition.READY,
+            asset_type__is_active=True,
         ).select_related('asset_type').order_by('asset_type__name', 'asset_name', 'pk')[:5])
         context['recent_custody'] = list(AssignmentHistory.objects.select_related(
             'asset', 'employee', 'actor'
@@ -408,6 +426,11 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         context = super().get_context_data(**kwargs)
         employee = self.object
         assigned_assets = list(Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type'))
+        open_cases = {case.asset_id: case for case in AssetExceptionCase.objects.filter(
+            asset_id__in=[asset.pk for asset in assigned_assets], resolved_at__isnull=True,
+        ).select_related('opened_by')}
+        for asset in assigned_assets:
+            asset.open_case = open_cases.get(asset.pk)
         context['assigned_assets'] = assigned_assets
         context['held_asset_count'] = len(assigned_assets)
         context['offboarding_today'] = timezone.now().date()
@@ -420,7 +443,8 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         query.pop('history_page', None)
         context['history_page_query'] = query.urlencode()
         context['available_assets'] = Asset.objects.filter(
-            is_active=True, assigned_to__isnull=True, asset_type__is_active=True
+            is_active=True, assigned_to__isnull=True, disposition=Asset.Disposition.READY,
+            asset_type__is_active=True,
         ).select_related('asset_type').order_by('asset_type__name', 'asset_name') if employee.is_active else []
 
         # Preserve the detail context used by assignment controls.
@@ -428,7 +452,8 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         unassigned_by_type = {}
         for asset_type in asset_types:
             unassigned_by_type[asset_type.id] = Asset.objects.filter(
-                asset_type=asset_type, assigned_to__isnull=True, is_active=True
+                asset_type=asset_type, assigned_to__isnull=True, disposition=Asset.Disposition.READY,
+                is_active=True,
             ).order_by('asset_name')
         context['unassigned_by_type'] = unassigned_by_type
         context['asset_types'] = asset_types
@@ -456,6 +481,13 @@ class AssetHistoryView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
         query = self.request.GET.copy()
         query.pop('history_page', None)
         context['history_page_query'] = query.urlencode()
+        context['open_case'] = AssetExceptionCase.objects.filter(
+            asset=self.object, resolved_at__isnull=True,
+        ).select_related('opened_by').first()
+        if context['open_case']:
+            context['open_case_latest_event'] = AssignmentHistory.objects.filter(
+                case=context['open_case'],
+            ).select_related('actor').order_by('-occurred_at', '-pk').first()
         return context
 
 class EmployeeSoftDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -484,7 +516,7 @@ class EmployeeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     def post(self, request, *args, **kwargs):
         employee = self.get_object()
         deactivate_employee(employee.pk, request.user, employee.exit_date or timezone.now().date())
-        messages.success(request, 'Employee deactivated; assignment history was retained.')
+        messages.success(request, 'Employee deactivated; unreceived assets remain linked for recovery review.')
         return redirect(self.success_url)
 
 class AssignAssetToEmployeeView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -509,18 +541,58 @@ class UnassignAssetView(LoginRequiredMixin, UserPassesTestMixin, View):
         return self.request.user.is_staff
 
     def post(self, request, asset_id):
-        asset = get_object_or_404(Asset, id=asset_id, is_active=True)
-        if asset.assigned_to:
-            try:
-                expected_employee_id = int(request.POST.get('expected_employee_id', ''))
-            except (TypeError, ValueError):
-                return JsonResponse({'success': False, 'message': 'Refresh this page before returning the asset.'}, status=400)
-            try:
-                change_asset_assignment(asset.pk, None, request.user, expected_employee_id=expected_employee_id)
-            except ValidationError as exc:
-                return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
-            return JsonResponse({'success': True, 'message': 'Asset returned successfully'})
-        return JsonResponse({'success': False, 'message': 'Asset is not assigned'})
+        form = PhysicalReceiptForm(request.POST)
+        if not form.is_valid():
+            return JsonResponse({'success': False, 'message': next(iter(form.errors.values()))[0]}, status=400)
+        try:
+            disposition = record_physical_receipt(
+                asset_id, request.user,
+                expected_employee_id=form.cleaned_data['expected_employee_id'],
+                expected_disposition=form.cleaned_data['expected_disposition'],
+                condition=form.cleaned_data['condition'], note=form.cleaned_data['note'],
+                observed_at=form.cleaned_data['observed_at'],
+            )
+        except ValidationError as exc:
+            return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
+        return JsonResponse({'success': True, 'message': (
+            'Physical receipt recorded; asset is ready.' if disposition == Asset.Disposition.READY
+            else 'Physical receipt recorded; asset is on inspection hold.'
+        )})
+
+
+class ReportMissingAssetView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def post(self, request, asset_id):
+        form = MissingReportForm(request.POST)
+        if not form.is_valid():
+            return JsonResponse({'success': False, 'message': next(iter(form.errors.values()))[0]}, status=400)
+        try:
+            report_missing(
+                asset_id, request.user,
+                expected_employee_id=form.cleaned_data['expected_employee_id'],
+                expected_disposition=form.cleaned_data['expected_disposition'],
+                note=form.cleaned_data['note'], observed_at=form.cleaned_data['observed_at'],
+            )
+        except ValidationError as exc:
+            return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
+        return JsonResponse({'success': True, 'message': 'Missing report recorded; holder remains accountable.'})
+
+
+class ReleaseInspectionView(LoginRequiredMixin, UserPassesTestMixin, View):
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def post(self, request, asset_id):
+        form = InspectionReleaseForm(request.POST)
+        if not form.is_valid():
+            return JsonResponse({'success': False, 'message': next(iter(form.errors.values()))[0]}, status=400)
+        try:
+            release_inspection(asset_id, request.user, note=form.cleaned_data['note'])
+        except ValidationError as exc:
+            return JsonResponse({'success': False, 'message': exc.messages[0]}, status=409)
+        return JsonResponse({'success': True, 'message': 'Inspection case resolved; asset is ready.'})
 
 class UnassignedAssetsAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
@@ -529,7 +601,10 @@ class UnassignedAssetsAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     def get(self, request, asset_type_id):
         if not AssetType.objects.filter(pk=asset_type_id, is_active=True).exists():
             return JsonResponse({'detail': 'Asset type is unavailable.'}, status=404)
-        unassigned = Asset.objects.filter(asset_type_id=asset_type_id, assigned_to__isnull=True, is_active=True).values('id', 'asset_name', 'unique_identifier')
+        unassigned = Asset.objects.filter(
+            asset_type_id=asset_type_id, assigned_to__isnull=True,
+            disposition=Asset.Disposition.READY, is_active=True,
+        ).values('id', 'asset_name', 'unique_identifier')
         return JsonResponse(list(unassigned), safe=False)
 
 
@@ -554,6 +629,6 @@ class EmployeeAssetOverviewCSVView(LoginRequiredMixin, UserPassesTestMixin, View
                 writer.writerow([self.safe_cell(value) for value in (
                     employee.employee_id, employee.name, employee.department, employee.designation,
                     asset.asset_type.name if asset else '', asset.asset_name if asset else '',
-                    asset.unique_identifier if asset else '', 'Assigned' if asset else 'No active assets',
+                    asset.unique_identifier if asset else '', asset.get_disposition_display() if asset else 'No active assets',
                 )])
         return response

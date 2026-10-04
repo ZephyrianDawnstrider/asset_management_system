@@ -4,7 +4,7 @@ from assets.models import Employee
 from assets.services import deactivate_employee
 
 class Command(BaseCommand):
-    help = 'Deactivates employees and returns their assets after their final active day.'
+    help = 'Deactivates employees after their final active day while preserving unresolved asset custody.'
 
     def handle(self, *args, **options):
         today = timezone.now().date()
@@ -13,6 +13,6 @@ class Command(BaseCommand):
         for employee in employees_to_deactivate:
             deactivate_employee(employee.pk, exit_date=employee.exit_date)
 
-            self.stdout.write(self.style.SUCCESS(f'Successfully deactivated employee {employee.name} ({employee.employee_id}) and unassigned their assets.'))
+            self.stdout.write(self.style.SUCCESS(f'Deactivated employee {employee.name} ({employee.employee_id}); unresolved assets remain linked for review.'))
 
         self.stdout.write(self.style.SUCCESS('Finished deactivating employees.'))

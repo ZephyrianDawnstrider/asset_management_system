@@ -1,4 +1,5 @@
 import csv
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -9,9 +10,9 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import JsonResponse, HttpResponse
+from django.http import Http404, JsonResponse, HttpResponse
 from django.utils import timezone
-from django.db.models import F, Q
+from django.db.models import Count, F, Q
 from .models import Employee, AssetType, Asset, AssignmentHistory
 from .forms import AssetAssignmentForm, AssetAssignmentToEmployeeForm
 from django.views import View
@@ -123,6 +124,9 @@ class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def test_func(self):
         return self.request.user.is_staff
 
+    def get_queryset(self):
+        return Employee.objects.filter(is_active=True)
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         form.fields['start_date'].widget.attrs.update({'type': 'date'})
@@ -132,13 +136,12 @@ class EmployeeUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def form_valid(self, form):
         employee = form.save(commit=False)
         editable_fields = ['employee_id', 'name', 'department', 'designation', 'start_date', 'exit_date']
-        if employee.exit_date:
-            if employee.exit_date < timezone.now().date():
-                with transaction.atomic():
-                    employee.save(update_fields=editable_fields)
-                    deactivate_employee(employee.pk, self.request.user, employee.exit_date)
-                return redirect(self.success_url)
-        employee.save(update_fields=editable_fields)
+        with transaction.atomic():
+            if not Employee.objects.select_for_update().filter(pk=employee.pk, is_active=True).exists():
+                raise Http404('This employee record is inactive.')
+            employee.save(update_fields=editable_fields)
+            if employee.exit_date and employee.exit_date < timezone.now().date():
+                deactivate_employee(employee.pk, self.request.user, employee.exit_date)
         return redirect(self.success_url)
 
 # AssetType CRUD Views
@@ -355,6 +358,15 @@ class EmployeeAssetOverviewView(LoginRequiredMixin, UserPassesTestMixin, Gracefu
         context['total_assets'] = Asset.objects.filter(is_active=True).count()
         context['assigned_assets'] = Asset.objects.filter(is_active=True, assigned_to__isnull=False).count()
         context['unassigned_assets_count'] = context['total_assets'] - context['assigned_assets']
+        today = timezone.now().date()
+        offboarding = Employee.objects.filter(
+            is_active=True, exit_date__isnull=False, exit_date__lte=today + timedelta(days=14)
+        ).annotate(held_asset_count=Count('asset', filter=Q(asset__is_active=True))).filter(
+            held_asset_count__gt=0
+        ).order_by('exit_date', 'name', 'pk')
+        context['offboarding_today'] = today
+        context['offboarding_total'] = offboarding.count()
+        context['offboarding_queue'] = list(offboarding[:8])
         context['available_assets'] = list(Asset.objects.filter(
             is_active=True, assigned_to__isnull=True, asset_type__is_active=True
         ).select_related('asset_type').order_by('asset_type__name', 'asset_name', 'pk')[:5])
@@ -394,9 +406,11 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        employee = self.get_object()
-        assigned_assets = Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type')
+        employee = self.object
+        assigned_assets = list(Asset.objects.filter(assigned_to=employee, is_active=True).select_related('asset_type'))
         context['assigned_assets'] = assigned_assets
+        context['held_asset_count'] = len(assigned_assets)
+        context['offboarding_today'] = timezone.now().date()
         history = AssignmentHistory.objects.filter(employee=employee).select_related('asset', 'actor').order_by('-occurred_at', '-pk')
         history_page = Paginator(history, 20).get_page(self.request.GET.get('history_page'))
         context['assignment_history'] = history_page
@@ -407,20 +421,18 @@ class EmployeeAssetDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailVie
         context['history_page_query'] = query.urlencode()
         context['available_assets'] = Asset.objects.filter(
             is_active=True, assigned_to__isnull=True, asset_type__is_active=True
-        ).select_related('asset_type').order_by('asset_type__name', 'asset_name')
+        ).select_related('asset_type').order_by('asset_type__name', 'asset_name') if employee.is_active else []
 
-        # Unassigned assets by type for assignment
+        # Preserve the detail context used by assignment controls.
         asset_types = AssetType.objects.filter(is_active=True)
         unassigned_by_type = {}
-        for at in asset_types:
-            unassigned = Asset.objects.filter(asset_type=at, assigned_to__isnull=True, is_active=True).order_by('asset_name')
-            unassigned_by_type[at.id] = unassigned
+        for asset_type in asset_types:
+            unassigned_by_type[asset_type.id] = Asset.objects.filter(
+                asset_type=asset_type, assigned_to__isnull=True, is_active=True
+            ).order_by('asset_name')
         context['unassigned_by_type'] = unassigned_by_type
         context['asset_types'] = asset_types
-
-        # Check if employee has asset of each type
-        assigned_types = set(assigned_assets.values_list('asset_type__id', flat=True))
-        context['assigned_types'] = assigned_types
+        context['assigned_types'] = {asset.asset_type_id for asset in assigned_assets}
 
         return context
 
@@ -465,6 +477,9 @@ class EmployeeDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
 
     def test_func(self):
         return self.request.user.is_staff
+
+    def get_queryset(self):
+        return Employee.objects.filter(is_active=True)
 
     def post(self, request, *args, **kwargs):
         employee = self.get_object()

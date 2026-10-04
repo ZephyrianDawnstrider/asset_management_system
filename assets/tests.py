@@ -250,10 +250,10 @@ class AssetWorkflowTests(TestCase):
             'employee_id': self.first.employee_id, 'name': 'Ari Updated', 'department': 'Ops',
             'designation': 'Lead', 'start_date': '2026-01-01', 'exit_date': '',
         })
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 404)
         self.first.refresh_from_db()
         self.assertFalse(self.first.is_active)
-        self.assertEqual(self.first.name, 'Ari Updated')
+        self.assertEqual(self.first.name, 'Ari Example')
 
     def test_employee_list_filters_paginates_and_preserves_encoded_query(self):
         for n in range(25):
@@ -322,6 +322,69 @@ class AssetWorkflowTests(TestCase):
         self.assertEqual(response.context['employees'].number, 2)
         self.assertEqual(len(response.context['employee_rows']), 2)
         self.assertIn('department=Support', response.context['page_query'])
+
+    def test_offboarding_queue_uses_final_day_window_and_active_custody(self):
+        self.first.exit_date = '2026-10-03'
+        self.first.save(update_fields=['exit_date'])
+        self.second.exit_date = '2026-10-18'
+        self.second.save(update_fields=['exit_date'])
+        self.asset.assigned_to = self.first
+        self.asset.save(update_fields=['assigned_to'])
+        for suffix, exit_date, active_employee, active_asset in (
+            ('FUTURE', '2026-10-19', True, True),
+            ('NONE', None, True, True),
+            ('RETIRED', '2026-10-04', True, False),
+            ('INACTIVE', '2026-10-02', False, True),
+        ):
+            employee = Employee.objects.create(employee_id=f'EMP-{suffix}', name=suffix, department='Ops',
+                                               designation='Analyst', start_date='2026-01-01',
+                                               exit_date=exit_date, is_active=active_employee)
+            Asset.objects.create(asset_type=self.kind, unique_identifier=f'SERIAL-{suffix}', asset_name=suffix,
+                                 assigned_to=employee, is_active=active_asset)
+        Asset.objects.create(asset_type=self.kind, unique_identifier='SERIAL-BOUNDARY', asset_name='Boundary asset',
+                             assigned_to=self.second)
+        self.client.force_login(self.staff)
+        with patch('assets.views.timezone.now', return_value=datetime(2026, 10, 4, 12, tzinfo=dt_timezone.utc)):
+            response = self.client.get(reverse('employee_overview'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['offboarding_total'], 2)
+        self.assertEqual([(person.employee_id, person.held_asset_count) for person in response.context['offboarding_queue']],
+                         [('EMP-01', 1), ('EMP-02', 1)])
+        self.assertContains(response, 'Final day passed')
+        self.assertContains(response, 'Upcoming final day')
+        self.assertContains(response, 'A final active day is not a return due date.')
+        self.client.force_login(self.nonstaff)
+        self.assertEqual(self.client.get(reverse('employee_overview')).status_code, 403)
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse('employee_overview')).status_code, 302)
+
+    def test_offboarding_detail_deactivation_preserves_history_and_becomes_read_only(self):
+        self.first.exit_date = '2026-10-04'
+        self.first.save(update_fields=['exit_date'])
+        self.asset.assigned_to = self.first
+        self.asset.save(update_fields=['assigned_to'])
+        self.client.force_login(self.staff)
+        detail_url = reverse('employee_detail', args=[self.first.employee_id])
+        active = self.client.get(detail_url)
+        self.assertContains(active, 'Offboarding checklist')
+        self.assertContains(active, 'Deactivate now and return held assets')
+        self.assertContains(active, 'Return asset')
+        response = self.client.post(reverse('employee_soft_delete', args=[self.first.employee_id]))
+        self.assertEqual(response.status_code, 302)
+        self.first.refresh_from_db()
+        self.asset.refresh_from_db()
+        self.assertFalse(self.first.is_active)
+        self.assertIsNone(self.asset.assigned_to_id)
+        self.assertTrue(AssignmentHistory.objects.filter(asset=self.asset, employee=self.first, action='returned').exists())
+        inactive = self.client.get(detail_url)
+        self.assertContains(inactive, 'Inactive record · read-only')
+        self.assertContains(inactive, 'Returned')
+        self.assertNotContains(inactive, 'Edit employee')
+        self.assertNotContains(inactive, 'Return asset')
+        self.assertNotContains(inactive, 'Assign available equipment')
+        self.assertNotContains(inactive, 'Deactivate now and return held assets')
+        self.assertEqual(self.client.get(reverse('employee_update', args=[self.first.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse('employee_delete', args=[self.first.employee_id])).status_code, 404)
 
     def test_employee_and_retired_asset_history_are_fully_paginated(self):
         for n in range(21):

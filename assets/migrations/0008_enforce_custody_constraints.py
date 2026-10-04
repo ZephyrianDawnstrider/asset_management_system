@@ -4,17 +4,18 @@ from django.conf import settings
 from django.db import migrations, models
 
 
-def grant_private_case_runtime_access(apps, schema_editor):
+def hold_private_case_runtime_writes(apps, schema_editor):
     if schema_editor.connection.vendor != 'postgresql' or not settings.PRODUCTION:
         return
-    # The web login is deliberately separate from the schema owner. This new
-    # private table needs explicit rights but no Data API or public grant.
+    # Keep the new private table readable by the paused web app. Write grants
+    # are restored only at the separately reviewed cutover resume gate.
     with schema_editor.connection.cursor() as cursor:
         cursor.execute("SELECT has_schema_privilege('assets_portfolio_app', 'assets_portfolio', 'USAGE')")
         if not cursor.fetchone()[0]:
             raise RuntimeError('The app role lacks USAGE on assets_portfolio; review role setup before migration.')
         cursor.execute('REVOKE ALL ON TABLE assets_portfolio.assets_assetexceptioncase FROM PUBLIC, anon, authenticated')
-        cursor.execute('GRANT SELECT, INSERT, UPDATE ON TABLE assets_portfolio.assets_assetexceptioncase TO assets_portfolio_app')
+        cursor.execute('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE assets_portfolio.assets_assetexceptioncase FROM assets_portfolio_app')
+        cursor.execute('GRANT SELECT ON TABLE assets_portfolio.assets_assetexceptioncase TO assets_portfolio_app')
         cursor.execute("SELECT pg_get_serial_sequence('assets_portfolio.assets_assetexceptioncase', 'id')")
         sequence = cursor.fetchone()[0]
         if not sequence:
@@ -22,7 +23,7 @@ def grant_private_case_runtime_access(apps, schema_editor):
         # pg_get_serial_sequence returns the catalog-quoted identifier, and
         # the table and column names above are fixed by this migration.
         cursor.execute(f'REVOKE ALL ON SEQUENCE {sequence} FROM PUBLIC, anon, authenticated')
-        cursor.execute(f'GRANT USAGE ON SEQUENCE {sequence} TO assets_portfolio_app')
+        cursor.execute(f'REVOKE USAGE, UPDATE ON SEQUENCE {sequence} FROM assets_portfolio_app')
 
 
 class Migration(migrations.Migration):
@@ -55,5 +56,5 @@ class Migration(migrations.Migration):
                 name='asset_case_resolution_note_required',
             ),
         ),
-        migrations.RunPython(grant_private_case_runtime_access, migrations.RunPython.noop),
+        migrations.RunPython(hold_private_case_runtime_writes, migrations.RunPython.noop),
     ]

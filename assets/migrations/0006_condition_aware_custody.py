@@ -19,6 +19,49 @@ def preflight_retired_linked_custody(apps, schema_editor):
         )
 
 
+def preflight_runtime_write_hold(apps, schema_editor):
+    if schema_editor.connection.vendor != 'postgresql' or not settings.PRODUCTION:
+        return
+    # The case table is created by this migration. Check both existing objects
+    # and owner default ACLs before any schema change, or the runtime login can
+    # regain writes as soon as this migration commits.
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("SELECT current_user")
+        if cursor.fetchone()[0] != 'assets_portfolio_owner':
+            raise RuntimeError('Custody migration requires the assets_portfolio schema owner.')
+        cursor.execute("""
+            SELECT count(*) FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'assets_portfolio' AND (
+                (c.relkind IN ('r', 'p') AND (
+                    has_table_privilege('assets_portfolio_app', c.oid, 'INSERT') OR
+                    has_table_privilege('assets_portfolio_app', c.oid, 'UPDATE') OR
+                    has_table_privilege('assets_portfolio_app', c.oid, 'DELETE') OR
+                    has_table_privilege('assets_portfolio_app', c.oid, 'TRUNCATE') OR
+                    has_table_privilege('assets_portfolio_app', c.oid, 'REFERENCES') OR
+                    has_table_privilege('assets_portfolio_app', c.oid, 'TRIGGER')))
+                OR (c.relkind = 'S' AND (
+                    has_sequence_privilege('assets_portfolio_app', c.oid, 'USAGE') OR
+                    has_sequence_privilege('assets_portfolio_app', c.oid, 'UPDATE')))
+            )
+        """)
+        if cursor.fetchone()[0]:
+            raise RuntimeError('Runtime writes remain possible on existing assets_portfolio objects.')
+        cursor.execute("""
+            SELECT count(*) FROM pg_default_acl d
+            CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+            WHERE d.defaclrole = 'assets_portfolio_owner'::regrole
+              AND d.defaclnamespace IN (0, 'assets_portfolio'::regnamespace)
+              AND CASE WHEN acl.grantee = 0 THEN true
+                  ELSE pg_has_role('assets_portfolio_app'::regrole, acl.grantee, 'USAGE') END
+              AND ((d.defaclobjtype = 'r' AND acl.privilege_type IN
+                    ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'))
+                OR (d.defaclobjtype = 'S' AND acl.privilege_type IN ('USAGE', 'UPDATE')))
+        """)
+        if cursor.fetchone()[0]:
+            raise RuntimeError('Owner default privileges would regrant runtime writes on new custody objects.')
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -28,6 +71,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(preflight_retired_linked_custody, migrations.RunPython.noop),
+        migrations.RunPython(preflight_runtime_write_hold, migrations.RunPython.noop),
         migrations.CreateModel(
             name='AssetExceptionCase',
             fields=[
